@@ -4,9 +4,10 @@ Design of data packages for the nipy suite
 ==========================================
 
 When developing or using nipy, many data files can be useful. We divide
-the data files nipy uses into at least 3 categories
+the data files nipy uses into four vague categories
 
-#. *test data* - data files required for routine code testing
+#. *small test data* - data files required for routine code testing
+#. *large test data* - larger data files for optional tests
 #. *template data* - data files required for algorithms to function,
    such as templates or atlases
 #. *example data* - data files for running examples, or optional tests
@@ -16,43 +17,50 @@ shipped with the software, and live in the code repository. For example, in the
 case of ``nipy`` itself, there are some test files that live in the module path
 ``nipy.testing.data``.
 
-*template data* and *example data* are example of *data packages*.  What
-follows is a discussion of the design and use of data packages.
+*large test data*, *template data* and *example data* are example of *data
+packages*.  What follows is a discussion of the design and use of data packages.
 
-Use cases for data packages
-+++++++++++++++++++++++++++
+The general idea
+++++++++++++++++
+
+Data packages are just directories containing files.  The interface here is just
+that data pacakges have a:
+
+#. *name*  A unique string identifying the package
+#. *path*  The file path where the package directory can be found
+
+There is no versioning to data packages, other than that you might imply in the
+package *name*.  For example, we imagine that the ``0.3`` version of
+``nipy-data`` will be called ``nipy-data-0.3``.
+
+Then we need to work out how a program *using* a data package with ``name`` can
+find the path associated with ``name``.  Similarly we need to define how to
+install a data package so that it can be found.
 
 Using the data package
 ``````````````````````
 
-The programmer will want to use the data something like this:
+The programmer may want to use the data by *name*:
 
 .. testcode::
 
    from nibabel.data import make_datasource
 
-   templates = make_datasource('nipy', 'templates')
+   templates = make_datasource('nipy-templates-0.3')
    fname = templates.get_filename('ICBM152', '2mm', 'T1.nii.gz')
-   
+
 where ``fname`` will be the absolute path to the template image
-``ICBM152/2mm/T1.nii.gz``. 
-
-The programmer can insist on a particular version of a ``datasource``:
-
-.. testcode::
-
-   if templates.version < '0.4':
-      raise ValueError('Need datasource version at least 0.4')
+``ICBM152/2mm/T1.nii.gz``.
 
 If the repository cannot find the data, then:
 
->>> make_datasource('nipy', 'implausible')
+>>> make_datasource('nipy-implausible')
 Traceback
  ...
 nibabel.data.DataError
 
 where ``DataError`` gives a helpful warning about why the data was not
-found, and how it should be installed.  
+found, and how it should be installed.
 
 Warnings during installation
 ````````````````````````````
@@ -66,8 +74,8 @@ data when installing the package.  Thus::
 will import nipy after installation to check whether these raise an error:
 
 >>> from nibabel.data import make_datasource
->>> template = make_datasource('nipy', 'templates')
->>> example_data = make_datasource('nipy', 'data')
+>>> template = make_datasource('nipy-templates-0.2')
+>>> example_data = make_datasource('nipy-data-0.3')
 
 and warn the user accordingly, with some basic instructions for how to
 install the data.
@@ -78,138 +86,55 @@ Finding the data
 ````````````````
 
 The routine ``make_datasource`` will need to be able to find the data
-that has been installed.  For the following call:
+that has been installed.  Thus ``make_datasource`` needs to be able to get the
+package *path* given the package *name*.  When we call this:
 
->>> templates = make_datasource('nipy', 'templates')
+>>> templates = make_datasource('nipy-templates-0.2')
 
-We propose to:
+``make_datasource`` needs to be able to find a path for ``nipy-templates-0.2``.
 
-#. Get a list of paths where data is known to be stored with
-   ``nipy.data.get_data_path()``
-#. For each of these paths, search for directory ``nipy/templates``.  If
-   found, and of the correct format (see below), return a datasource,
-   otherwise raise an Exception
+For this we need somewhere to store and find the name / path pairs.  We store
+these in ini-type files.  The ini files have a section ``PACKAGE PATHS`` with
+name / path pairs like this::
 
-The paths collected by ``nipy.data.get_data_paths()`` will be
-constructed from ':' (Unix) or ';' separated strings.  The source of the
-strings (in the order in which they will be used in the search above)
-are:
+    [PACKAGE PATHS]
+    nipy-data-0.3 = /home/me/data/nipy-data-0.3
+    nipy-templates-0.2 = /usr/local/share/data/nipy/nipy-templates-0.2
 
-#. The value of the ``NIPY_DATA_PATH`` environment variable, if set
-#. A section = ``DATA``, parameter = ``path`` entry in a
-   ``config.ini`` file in ``nipy_dir`` where ``nipy_dir`` is
-   ``$HOME/.nipy`` or equivalent.
-#. Section = ``DATA``, parameter = ``path`` entries in configuration
-   ``.ini`` files, where the ``.ini`` files are found by
-   ``glob.glob(os.path.join(etc_dir, '*.ini')`` and ``etc_dir`` is
-   ``/etc/nipy`` on Unix, and some suitable equivalent on Windows.
-#. The result of ``os.path.join(sys.prefix, 'share', 'nipy')``
-#. If ``sys.prefix`` is ``/usr``, we add ``/usr/local/share/nipy``. We
-   need this because Python 2.6 in Debian / Ubuntu does default installs
-   to ``/usr/local``.
-#. The result of ``get_nipy_user_dir()``
+We search for ini files in the following places:
+
+#. File named by the ``NIPY_PKG_INI`` environment variable, if set
+#. Files matching "*.pkgpth" in the nipy home directory (the result of
+   ``get_nipy_user_dir()``)
+#. Files matching "*.pkgpth" in the *nipy system directory* where the *nipy system
+   directory* is ``/etc/nipy`` on Unix, and ``C:\etc\nipy`` on Windows.
+
+We search these in reverse order, that is, any package name / path pairs found in a file pointed
+to by the ``NIPY_PKG_INI`` environment variable will overwrite name / path pairs
+with the same name in the nipy user directory or the nipy system directory.
 
 Requirements for a data package
 ```````````````````````````````
 
-To be a valid NIPY project data package, you need to satisfy:
+To be a valid NIPY project data package, you only need to provide a directory
+tree containing the data, and add the ``my-package = /some/path`` name / path
+indictor in one of the ini files above.
 
-#. The installer installs the data in some place that can be found using
-   the method defined in :ref:`find-data`.
+We recommend that you install data in a standard location such as
+``<prefix>/share/nipy`` where ``<prefix>`` is the standard Python prefix
+obtained by ``>>> import sys; print sys.prefix``
 
-We recommend that:
-
-#. By default, you install data in a standard location such as
-   ``<prefix>/share/nipy`` where ``<prefix>`` is the standard Python
-   prefix obtained by ``>>> import sys; print sys.prefix``
+Installing data is just unpacking an archive into a directory, and then pointing
+the ini files (above) at the resulting directory.
 
 Remember that there is a distinction between the NIPY project - the
 umbrella of neuroimaging in python - and the NIPY package - the main
 code package in the NIPY project.  Thus, if you want to install data
 under the NIPY *package* umbrella, your data might go to
-``/usr/share/nipy/nipy/packagename`` (on Unix).  Note ``nipy`` twice -
-once for the project, once for the pacakge.  If you want to install data
-under - say - the ```pbrain`` package umbrella, that would go in
-``/usr/share/nipy/pbrain/packagename``.
-
-Data package format
-```````````````````
-
-The following tree is an example of the kind of pattern we would expect
-in a data directory, where the ``nipy-data`` and ``nipy-templates``
-packages have been installed::
-
-  <ROOT> 
-  `-- nipy
-      |-- data
-      |   |-- config.ini
-      |   `-- placeholder.txt
-      `-- templates
-          |-- ICBM152
-          |   `-- 2mm
-          |       `-- T1.nii.gz
-          |-- colin27
-          |   `-- 2mm
-          |       `-- T1.nii.gz
-          `-- config.ini
-
-The ``<ROOT>`` directory is the directory that will appear somewhere in
-the list from ``nipy.data.get_data_path()``.  The ``nipy`` subdirectory
-signifies data for the ``nipy`` package (as opposed to other
-NIPY-related packages such as ``pbrain``).  The ``data`` subdirectory of
-``nipy`` contains files from the ``nipy-data`` package.  In the
-``nipy/data`` or ``nipy/templates`` directories, there is a
-``config.ini`` file, that has at least an entry like this::
-
-  [DEFAULT]
-  version = 0.2
-
-giving the version of the data package.
-
-.. _data-package-design-install:
-
-Installing the data
-```````````````````
-
-We will use python distutils to install data packages, and the
-``data_files`` mechanism to install the data.  On Unix, with the
-following command::
-
-   python setup.py install --prefix=/my/prefix
-
-data will go to::
-
-   /my/prefix/share/nipy
-
-For the example above this will result in these subdirectories::
-
-   /my/prefix/share/nipy/nipy/data
-   /my/prefix/share/nipy/nipy/templates
-
-because ``nipy`` is both the project, and the package to which the data
-relates.
-
-If you install to a particular location, you will need to add that
-location to the output of ``nipy.data.get_data_path()`` using one of the mechanisms above, for example, in your system configuration::
-
-   export NIPY_DATA_PATH=/my/prefix/share/nipy
-
-Packaging for distributions
-```````````````````````````
-
-For a particular data package - say ``nipy-templates`` - distributions
-will want to:
-
-#. Install the data in set location.  The default from ``python setup.py install`` for the data packages will be ``/usr/share/nipy`` on Unix.
-#. Point a system installation of NIPY to these data. 
-
-For the latter, the most obvious route is to copy an ``.ini`` file named
-for the data package into the NIPY ``etc_dir``.  In this case, on Unix,
-we will want a file called ``/etc/nipy/nipy_templates.ini`` with
-contents::
-
-   [DATA]
-   path = /usr/share/nipy
+``/usr/share/nipy/nipy/my-package`` (on Unix).  Note ``nipy`` twice -
+once for the project, once for the package.  If you want to install data
+under - say - the ``pbrain`` package umbrella, that would go in
+``/usr/share/nipy/pbrain/my-package``.
 
 Current implementation
 ``````````````````````
@@ -228,12 +153,10 @@ now this will be: http://nipy.sourceforge.net/data-packages/ .
 A package, such as ``nipy-templates-0.2.tar.gz`` will have the following
 sort of structure::
 
-
   <ROOT>
-    |-- setup.py
-    |-- README.txt
-    |-- MANIFEST.in
-    `-- templates
+    `-- nipy-templates-0.2
+        |-- README.txt
+        |-- COPYING.txt
         |-- ICBM152
         |   |-- 1mm
         |   |   `-- T1_brain.nii.gz
@@ -244,28 +167,20 @@ sort of structure::
         |       `-- T1.nii.gz
         `-- config.ini
 
-
-There should be only one ``nipy/packagename`` directory delivered by a
-particular package.  For example, this package installs
-``nipy/templates``, but does not contain ``nipy/data``.
+Where the ``config.ini`` has optional metadata.
 
 Making a new package tarball is simply:
 
-#. Downloading and unpacking e.g ``nipy-templates-0.1.tar.gz`` to form
+#. Downloading and unpacking e.g ``nipy-templates-0.2.tar.gz`` to form
    the directory structure above.
 #. Making any changes to the directory
-#. Running ``setup.py sdist`` to recreate the package.
+#. Packing up the directory with (e.g.) ``tar cvf nipy-templates-0.2.tar.gz *``
 
 The process of making a release should be:
 
-#. Increment the major or minor version number in the ``config.ini`` file
-#. Make a package tarball as above
+#. Increment the major or minor version number in the package name by renaming
+   the directory - e.g from ``nipy-templates-0.2`` to ``nipy-templates-0.3``.
+#. Make a package tarball as above - with the new tarball name - e.g
+   ``nipy-templates-0.3.tar.gz``.
 #. Upload to distribution site
 
-There is an example nipy data package ``nipy-examplepkg`` in the
-``examples`` directory of the NIPY repository.
-
-The machinery for creating and maintaining data packages is available at
-http://github.com/nipy/data-packaging
-
-See the ``README.txt`` file there for more information.

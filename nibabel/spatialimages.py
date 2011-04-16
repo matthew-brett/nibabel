@@ -346,10 +346,51 @@ class SpatialImage(object):
     def set_data_dtype(self, dtype):
         self._header.set_data_dtype(dtype)
 
-    def get_affine(self):
-        return self._affine
+    def get_affine(self, copy=None):
+        """ Get affine, maybe with copy
 
-    def get_header(self):
+        Parameters
+        ----------
+        copy : None or bool
+            If None, default to False.  If True, returns copy of affine.  If
+            False returns reference to affine.
+
+        Returns
+        -------
+        aff : (4,4) ndarray
+        """
+        if copy is None:
+            warnings.warn('Using default of False for "copy" arg. The default '
+                          'will change to True in the next version of nibabel',
+                          FutureWarning,
+                          stacklevel=2)
+            copy = False
+        aff = self._affine
+        if copy and not aff is None:
+            return aff.copy()
+        return aff
+
+    def get_header(self, copy=None):
+        """ Get header, maybe with copy
+
+        Parameters
+        ----------
+        copy : None or bool
+            If None, default to False.  If True, returns copy of header.  If
+            False returns reference to header.
+
+        Returns
+        -------
+        header : header instance
+        """
+        if copy is None:
+            warnings.warn('Using default of False for "copy" arg. The default '
+                          'will change to True in the next version of nibabel',
+                          FutureWarning,
+                          stacklevel=2)
+            copy = False
+        if copy:
+            return self._header.copy()
         return self._header
 
     def get_filename(self):
@@ -540,8 +581,9 @@ class SpatialImage(object):
         cimg : ``spatialimage`` instance
            Image, of our own class
         '''
+        hdr = img.get_header(copy=True)
         return klass(img.get_data(),
-                     img.get_affine(),
-                     klass.header_class.from_header(img.get_header()),
+                     img.get_affine(copy=True),
+                     klass.header_class.from_header(hdr),
                      extra=img.extra.copy())
 

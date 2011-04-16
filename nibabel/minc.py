@@ -76,7 +76,19 @@ class MincFile(object):
         return tuple(
             [float(dim.step) for dim in self._dims])
 
-    def get_affine(self):
+    def get_affine(self, copy=True):
+        """ Get affine
+
+        Parameters
+        ----------
+        copy : None or bool
+            In fact we always copy a minc affine, so `copy` is ignored.  It's
+            here for API compatibility with other image types.
+
+        Returns
+        -------
+        aff : (4,4) ndarray
+        """
         nspatial = len(self._spatial_dims)
         rot_mat = np.eye(nspatial)
         steps = np.zeros((nspatial,))

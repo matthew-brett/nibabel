@@ -410,11 +410,14 @@ class TestAnalyzeImage(tsi.TestSpatialImage):
         img2 = IC.from_file_map(fm)
         assert_equal(img2.shape, shape)
         assert_equal(img2.get_data_dtype().type, np.int16)
-        hdr = img2.get_header()
+        # Copy=False to modify header in-place
+        hdr = img2.get_header(copy=False)
         hdr.set_data_shape((3,2,2))
         assert_equal(hdr.get_data_shape(), (3,2,2))
         hdr.set_data_dtype(np.uint8)
         assert_equal(hdr.get_data_dtype(), np.dtype(np.uint8))
+        # The data in the image is read as it should be despite the changed
+        # header
         assert_array_equal(img2.get_data(), data)
         # now check read_img_data function - here we do see the changed
         # header
@@ -430,10 +433,11 @@ class TestAnalyzeImage(tsi.TestSpatialImage):
         affine = np.diag([2, 3, 4, 1])
         # OK - affine correct shape
         img = IC(data, affine)
-        assert_array_equal(affine, img.get_affine())
+        # Copy=True to silence warnings, will be future default
+        assert_array_equal(affine, img.get_affine(copy=True))
         # OK - affine can be array-like
         img = IC(data, affine.tolist())
-        assert_array_equal(affine, img.get_affine())
+        assert_array_equal(affine, img.get_affine(copy=True))
         # Not OK - affine wrong shape
         assert_raises(ValueError, IC, data, np.diag([2, 3, 4]))
 

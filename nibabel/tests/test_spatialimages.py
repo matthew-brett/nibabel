@@ -9,6 +9,8 @@
 """ Testing spatialimages
 
 """
+import warnings
+
 from ..py3k import BytesIO
 
 import numpy as np
@@ -173,9 +175,36 @@ class TestSpatialImage(TestCase):
     def test_images(self):
         img = self.image_class(None, None)
         assert_raises(ImageDataError, img.get_data)
-        assert_equal(img.get_affine(), None)
-        assert_equal(img.get_header(),
-                           self.image_class.header_class())
+        # silence warnings for tests
+        warnings.simplefilter('ignore')
+        try:
+            # Check None affine with copy= params
+            assert_equal(img.get_affine(), None)
+            assert_equal(img.get_affine(copy=True), None)
+            assert_equal(img.get_affine(copy=False), None)
+            # Check default header is standard empty
+            hdr = img.get_header()
+            assert_equal(img.get_header(),
+                        self.image_class.header_class())
+            # Now with real affine
+            aff = np.eye(4)
+            img = self.image_class(None, aff)
+            assert_false(img.get_affine(copy=True) is aff)
+            assert_true(img.get_affine(copy=False) is aff)
+            # Check default is copy=False
+            assert_true(img.get_affine() is aff)
+            # Check default header is of predicted class.  With a non-empty
+            # affine, it won't necessarily be standard empty
+            hdr = img.get_header()
+            assert_equal(type(img.get_header()),
+                        self.image_class.header_class)
+            # Check copy params
+            assert_false(img.get_header(copy=True) is hdr)
+            assert_true(img.get_header(copy=False) is hdr)
+            # Check default is copy=False
+            assert_true(img.get_header() is hdr)
+        finally:
+            warnings.resetwarnings()
 
     def test_data_default(self):
         # check that the default dtype comes from the data if the header

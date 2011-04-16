@@ -1283,11 +1283,6 @@ class AnalyzeImage(SpatialImage):
                 fileobj.close()
             return data
 
-    def get_header(self):
-        ''' Return header
-        '''
-        return self._header
-
     def get_data_dtype(self):
         return self._header.get_data_dtype()
 
@@ -1389,12 +1384,17 @@ class AnalyzeImage(SpatialImage):
         file_map : None or mapping, optional
            files mapping.  If None (default) use object's ``file_map``
            attribute instead
+
+        Notes
+        -----
+        Writing may modify the header in place
         '''
         if file_map is None:
             file_map = self.file_map
         data = self.get_data()
+        # Adapt header to changes in the image, such as the affine
         self.update_header()
-        hdr = self.get_header()
+        hdr = self.get_header(copy=False)
         slope, inter, mn, mx = hdr.scaling_from_data(data)
         hdr_fh, img_fh = self._get_fileholders(file_map)
         # Check if hdr and img refer to same file; this can happen with odd
@@ -1421,7 +1421,10 @@ class AnalyzeImage(SpatialImage):
         >>> data = np.zeros((2,3,4))
         >>> affine = np.diag([1.0,2.0,3.0,1.0])
         >>> img = AnalyzeImage(data, affine)
-        >>> hdr = img.get_header()
+
+        Get a reference to the header so we can modify in-place
+
+        >>> hdr = img.get_header(copy=False)
         >>> img.get_shape()
         (2, 3, 4)
         >>> img.update_header()

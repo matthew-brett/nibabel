@@ -42,7 +42,8 @@ def test_mincfile():
     assert_equal(mnc.get_data_dtype().type, np.uint8)
     assert_equal(mnc.get_data_shape(), MINC_EXAMPLE['shape'])
     assert_equal(mnc.get_zooms(), (2.0, 2.0, 2.0))
-    assert_array_equal(mnc.get_affine(), MINC_EXAMPLE['affine'])
+    # copy arg to silence warning
+    assert_array_equal(mnc.get_affine(copy=True), MINC_EXAMPLE['affine'])
     data = mnc.get_scaled_data()
     assert_equal(data.shape, MINC_EXAMPLE['shape'])
 
@@ -58,7 +59,8 @@ def test_load():
     assert_array_almost_equal(data.mean(), 0.60602819)
     # check if mnc can be converted to nifti
     ni_img = Nifti1Image.from_image(img)
-    assert_array_equal(ni_img.get_affine(), MINC_EXAMPLE['affine'])
+    # copy arg to silence warning
+    assert_array_equal(ni_img.get_affine(copy=True), MINC_EXAMPLE['affine'])
     assert_array_equal(ni_img.get_data(), data)
 
 

@@ -28,7 +28,8 @@ def test_concat():
     all_data = np.concatenate(
         [data0[:,:,:,np.newaxis],data1[:,:,:,np.newaxis]],3)
     assert_array_equal(all_imgs.get_data(), all_data)
-    assert_array_equal(all_imgs.get_affine(), affine)
+    # copy arg to silence warning
+    assert_array_equal(all_imgs.get_affine(copy=True), affine)
     # check that not-matching affines raise error
     img2 = Nifti1Image(data1, affine+1)
     assert_raises(ValueError, concat_images, [img0, img2])
@@ -37,7 +38,7 @@ def test_concat():
     # except if check_affines is False
     all_imgs = concat_images([img0, img1])
     assert_array_equal(all_imgs.get_data(), all_data)
-    assert_array_equal(all_imgs.get_affine(), affine)
+    assert_array_equal(all_imgs.get_affine(copy=True), affine)
 
 
 def test_closest_canonical():

@@ -420,7 +420,8 @@ def test_nifti1_images():
             img3 = Nifti1Image.load(fname)
             assert_true(isinstance(img3, img.__class__))
             assert_array_equal(img3.get_data(), data)
-            assert_equal(img3.get_header(), img.get_header())
+            # silence warnings with explicity copy arg
+            assert_equal(img3.get_header(copy=True), img.get_header(copy=True))
             # del to avoid windows errors of form 'The process cannot
             # access the file because it is being used'
             del img3
@@ -462,7 +463,8 @@ def test_extension_list():
 def test_nifti_extensions():
     nim = load(image_file)
     # basic checks of the available extensions
-    hdr = nim.get_header()
+    # copy arg to silence warnings
+    hdr = nim.get_header(copy=True)
     exts_container = hdr.extensions
     assert_equal(len(exts_container), 2)
     assert_equal(exts_container.count('comment'), 2)
@@ -488,7 +490,8 @@ def test_nifti_extensions():
 def test_loadsave_cycle():
     nim = load(image_file)
     # ensure we have extensions
-    hdr = nim.get_header()
+    # copy arg to silence warnings
+    hdr = nim.get_header(copy=True)
     exts_container = hdr.extensions
     assert_true(len(exts_container) > 0)
     # write into the air ;-)
@@ -498,14 +501,16 @@ def test_loadsave_cycle():
     stio.seek(0)
     # reload
     lnim = Nifti1Image.from_file_map(nim.file_map)
-    hdr = lnim.get_header()
+    # copy arg to silence warnings
+    hdr = lnim.get_header(copy=True)
     lexts_container = hdr.extensions
     assert_equal(exts_container,
                  lexts_container)
     # build int16 image
     data = np.ones((2,3,4,5), dtype='int16')
     img = Nifti1Image(data, np.eye(4))
-    hdr = img.get_header()
+    # copy arg to silence warnings
+    hdr = img.get_header(copy=True)
     assert_equal(hdr.get_data_dtype(), np.int16)
     # default should have no scaling
     assert_equal(hdr.get_slope_inter(), (1.0, 0.0))
@@ -515,7 +520,7 @@ def test_loadsave_cycle():
     # now build new image with updated header
     wnim = Nifti1Image(data, np.eye(4), header=hdr)
     assert_equal(wnim.get_data_dtype(), np.int16)
-    assert_equal(wnim.get_header().get_slope_inter(), (2, 8))
+    assert_equal(wnim.get_header(copy=True).get_slope_inter(), (2, 8))
     # write into the air again ;-)
     stio = BytesIO()
     wnim.file_map['image'].fileobj = stio
@@ -526,7 +531,7 @@ def test_loadsave_cycle():
     # the test below does not pass, because the slope and inter are
     # always reset from the data, by the image write
     raise SkipTest
-    assert_equal(lnim.get_header().get_slope_inter(), (2, 8))
+    assert_equal(lnim.get_header(copy=True).get_slope_inter(), (2, 8))
 
 
 def test_slope_inter():
@@ -599,7 +604,8 @@ def test_load_pixdims():
     hdr.set_sform(saff)
     assert_array_equal(hdr.get_sform(), saff)
     simg = Nifti1Image(arr, None, hdr)
-    img_hdr = simg.get_header()
+    # copy arg to silence warnings
+    img_hdr = simg.get_header(copy=True)
     # Check qform, sform, pixdims are the same
     assert_array_equal(img_hdr.get_qform(), qaff)
     assert_array_equal(img_hdr.get_sform(), saff)
@@ -612,7 +618,8 @@ def test_load_pixdims():
     re_simg = Nifti1Image.from_file_map(fm)
     assert_array_equal(re_simg.get_data(), arr)
     # Check qform, sform, pixdims are the same
-    rimg_hdr = re_simg.get_header()
+    # copy arg to silence warnings
+    rimg_hdr = re_simg.get_header(copy=True)
     assert_array_equal(rimg_hdr.get_qform(), qaff)
     assert_array_equal(rimg_hdr.get_sform(), saff)
     assert_array_equal(rimg_hdr.get_zooms(), [2,3,4])
@@ -626,7 +633,8 @@ def test_affines_init():
     aff = np.diag([2, 3, 4, 1])
     # Default is sform set, qform not set
     img = Nifti1Image(arr, aff)
-    hdr = img.get_header()
+    # copy arg to silence warnings
+    hdr = img.get_header(copy=True)
     assert_equal(hdr['qform_code'], 0)
     assert_equal(hdr['sform_code'], 2)
     assert_array_equal(hdr.get_zooms(), [2, 3, 4])
@@ -637,7 +645,7 @@ def test_affines_init():
     hdr.set_sform(saff, code='talairach')
     assert_array_equal(hdr.get_zooms(), [3, 4, 5])
     img = Nifti1Image(arr, aff, hdr)
-    new_hdr = img.get_header()
+    new_hdr = img.get_header(copy=True)
     # Again affine is sort of anonymous space
     assert_equal(new_hdr['qform_code'], 0)
     assert_equal(new_hdr['sform_code'], 2)
@@ -645,7 +653,7 @@ def test_affines_init():
     assert_array_equal(new_hdr.get_zooms(), [2, 3, 4])
     # But if no affine passed, codes and matrices stay the same
     img = Nifti1Image(arr, None, hdr)
-    new_hdr = img.get_header()
+    new_hdr = img.get_header(copy=True)
     assert_equal(new_hdr['qform_code'], 1) # scanner
     assert_array_equal(new_hdr.get_qform(), qaff)
     assert_equal(new_hdr['sform_code'], 3) # Still talairach

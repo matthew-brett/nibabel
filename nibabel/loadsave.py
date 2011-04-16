@@ -131,7 +131,7 @@ def read_img_data(img, prefer='scaled'):
         raise ImageFileError('No image file specified for this image')
     if prefer not in ('scaled', 'unscaled'):
         raise ValueError('Invalid string "%s" for "prefer"' % prefer)
-    hdr = img.get_header()
+    hdr = img.get_header(copy=True)
     if prefer == 'unscaled':
         try:
             return hdr.raw_data_from_fileobj(fileobj)

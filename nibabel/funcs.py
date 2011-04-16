@@ -81,8 +81,8 @@ def squeeze_image(img):
     data = img.get_data()
     data = data.reshape(shape)
     return klass(data,
-                 img.get_affine(),
-                 img.get_header(),
+                 img.get_affine(copy=True),
+                 img.get_header(copy=True),
                  img.extra)
 
 
@@ -106,13 +106,13 @@ def concat_images(images, check_affines=True):
     n_imgs = len(images)
     img0 = images[0]
     i0shape = img0.get_shape()
-    affine = img0.get_affine()
-    header = img0.get_header()
+    affine = img0.get_affine(copy=True)
+    header = img0.get_header(copy=True)
     out_shape = (n_imgs, ) + i0shape
     out_data = np.empty(out_shape)
     for i, img in enumerate(images):
         if check_affines:
-            if not np.all(img.get_affine() == affine):
+            if not np.all(img.get_affine(copy=True) == affine):
                 raise ValueError('Affines do not match')
         out_data[i] = img.get_data()
     out_data = np.rollaxis(out_data, 0, len(i0shape)+1)
@@ -136,8 +136,8 @@ def four_to_three(img):
        list of 3D images
     '''
     arr = img.get_data()
-    header = img.get_header()
-    affine = img.get_affine()
+    header = img.get_header(copy=True)
+    affine = img.get_affine(copy=True)
     image_maker = img.__class__
     if arr.ndim != 4:
         raise ValueError('Expecting four dimensions')
@@ -171,7 +171,7 @@ def as_closest_canonical(img, enforce_diag=False):
        already has the correct data ordering, we just return `img`
        unmodified.
     '''
-    aff = img.get_affine()
+    aff = img.get_affine(copy=True)
     ornt = io_orientation(aff)
     if np.all(ornt == [[0, 1],
                        [1,1],
@@ -189,7 +189,7 @@ def as_closest_canonical(img, enforce_diag=False):
     # we need to transform the data
     arr = img.get_data()
     t_arr = apply_orientation(arr, ornt)
-    return img.__class__(t_arr, out_aff, img.get_header())
+    return img.__class__(t_arr, out_aff, img.get_header(copy=True))
 
 
 def _aff_is_diag(aff):

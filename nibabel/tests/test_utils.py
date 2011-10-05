@@ -19,6 +19,7 @@ from ..volumeutils import (array_from_file,
                            array_to_file,
                            calculate_scale,
                            scale_min_max,
+                           finite_range,
                            can_cast, allopen,
                            make_dt_codes,
                            native_code,
@@ -236,6 +237,23 @@ def test_can_cast():
         assert_equal, def_res, can_cast(intype, outtype)
         assert_equal, scale_res, can_cast(intype, outtype, False, True)
         assert_equal, all_res, can_cast(intype, outtype, True, True)
+
+
+def test_finite_range():
+    # Finite range utility function
+    a = np.array([[-1, 0, 1],[np.inf, np.nan, -np.inf]])
+    assert_equal(finite_range(a), (-1.0, 1.0))
+    a = np.array([[np.nan],[np.nan]])
+    assert_equal(finite_range(a), (np.inf, -np.inf))
+    a = np.array([[-3, 0, 1],[2,-1,4]], dtype=np.int)
+    assert_equal(finite_range(a), (-3, 4))
+    a = np.array([[1, 0, 1],[2,3,4]], dtype=np.uint)
+    assert_equal(finite_range(a), (0, 4))
+    a = a + 1j
+    assert_raises(TypeError, finite_range, a)
+    # 1D case
+    a = np.array([0., 1, 2, 3])
+    assert_equal(finite_range(a), (0,3))
 
 
 def test_allopen():

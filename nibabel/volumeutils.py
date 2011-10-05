@@ -803,6 +803,8 @@ def finite_range(arr):
         return np.min(sarr), np.max(sarr)
     if typ not in np.sctypes['float']:
         raise TypeError('Can only handle floats and (u)ints')
+    # Deal with 1D arrays in loop below
+    sarr = np.atleast_2d(sarr)
     # Loop to avoid big isfinite temporary
     mx = -np.inf
     mn = np.inf

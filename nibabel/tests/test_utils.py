@@ -27,6 +27,7 @@ from ..volumeutils import (array_from_file,
                            rec2dict)
 
 from numpy.testing import (assert_array_almost_equal,
+                           assert_almost_equal,
                            assert_array_equal)
 
 from nose.tools import assert_true, assert_equal, assert_raises
@@ -159,6 +160,53 @@ def test_array_to_file():
     array_to_file(arr + np.inf, str_io, np.int32, 0, 0.0, None)
     data_back = array_from_file(arr.shape, np.int32, str_io)
     assert_array_equal(data_back, np.zeros(arr.shape))
+
+
+def type_min_max(dtype_type):
+    # Utility routine to return min, max for dtype dtype
+    if dtype_type in (np.sctypes['complex'] + np.sctypes['float']):
+        info = np.finfo(dtype_type)
+    elif dtype_type in (np.sctypes['int'] + np.sctypes['uint']):
+        info = np.iinfo(dtype_type)
+    else:
+        raise ValueError('Sorry, out of my range')
+    return info.min, info.max
+
+
+def test_scaling_in_abstract():
+    # Confirm that, for all ints and uints as input, and all possible outputs,
+    # for any simple way of doing the calculation, the result is near enough
+    for category0, category1 in (('int', 'int'),
+                                 ('uint', 'int'),
+                                ):
+        for in_type in np.sctypes[category0]:
+            for out_type in np.sctypes[category1]:
+                check_int_conv(in_type, out_type)
+    # Converting floats to integer
+    # Work in progress
+
+
+def check_int_conv(in_type, out_type):
+    # Test that input and output are the same with scaling, intercept
+    this_min, this_max = type_min_max(in_type)
+    data = np.array([this_min, this_max], in_type)
+    out_dtype = np.dtype(out_type)
+    scale, inter, mn, mx = calculate_scale(data, out_dtype, True)
+    if scale == 1.0 and inter == 0.0:
+        return
+    res = (data - inter) / scale
+    back = np.rint(res).astype(out_type) * scale + inter
+    assert_true(np.allclose(data, back))
+    # Try different method of applying scale and inter
+    res = data / scale - inter / scale
+    back = np.rint(res).astype(out_type) * scale + inter
+    assert_true(np.allclose(data, back))
+    # Try with analyze-size scale and inter
+    scale = np.float32(scale)
+    inter = np.float32(inter)
+    res = (data - inter) / scale
+    back = res * scale + inter
+    assert_true(np.allclose(data, back))
 
 
 def write_return(data, fileobj, out_dtype, *args, **kwargs):

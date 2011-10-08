@@ -542,7 +542,8 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
        Whether to set NaN values to 0 when writing integer output.
        Defaults to True.  If False, NaNs will be represented as numpy
        does when casting, and this can be odd (often the lowest
-       available integer value)
+       available integer value).  This parameter ignored for floating point
+       output.
 
     Examples
     --------
@@ -571,6 +572,8 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
         out_dtype = in_dtype
     else:
         out_dtype = np.dtype(out_dtype)
+    in_type = in_dtype.type
+    out_type = out_dtype.type
     try:
         fileobj.seek(offset)
     except IOError:
@@ -580,35 +583,56 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
     if divslope is None: # No valid data
         fileobj.write(ZEROB * (data.size*out_dtype.itemsize))
         return
+    # Do we have slope, intercept, both?
+    have_slope = divslope != 1.0
+    have_inter = intercept != 0.0
+    slope_inter = have_slope and have_inter
     nan2zero = (nan2zero and
-                data.dtype in floating_point_types and
-                out_dtype not in floating_point_types)
-    needs_copy = nan2zero or mx or mn or intercept or divslope != 1.0
+                in_type in floating_point_types and
+                out_type not in floating_point_types)
+    needs_copy = nan2zero or mx or mn
+    # Whether to round before conversion
+    needs_rint = (out_type in integer_types and
+                  (in_type in integer_types or
+                   have_slope or have_inter))
+    # Other test shortcuts
+    mnmx = mn and mx
+    correct_dtype = in_dtype == out_dtype
+    only_byte_swapped = in_dtype == out_dtype.newbyteorder('S')
+
     if data.ndim < 2: # a little hack to allow 1D arrays in loop below
         data = [data]
     elif order == 'F':
         data = data.T
     elif order != 'C':
         raise ValueError('Order should be one of F or C')
-    for dslice in data: # cycle over largest dimension to save memory
+    for dslice in data:
         if needs_copy:
             dslice = dslice.copy()
         if nan2zero:
             dslice[np.isnan(dslice)] = 0
-        if mx:
-            dslice[dslice > mx] = mx
-        if mn:
-            dslice[dslice < mn] = mn
-        if intercept:
-            dslice -= intercept
-        if divslope != 1.0:
-            dslice /= divslope
-        if in_dtype == out_dtype:
+        if mnmx:
+            np.clip(dslice, mn, mx, dslice)
+        else:
+            if mx:
+                dslice[dslice > mx] = mx
+            if mn:
+                dslice[dslice < mn] = mn
+        if slope_inter:
+            dslice = (dslice - intercept) / divslope
+        else:
+            if have_inter:
+                dslice = dslice - intercept
+            if have_slope:
+                dslice = dslice / divslope
+        if correct_dtype:
             fileobj.write(dslice.tostring())
-        elif in_dtype == out_dtype.newbyteorder('S'): # just byte swapped
+        elif only_byte_swapped:
             out_arr = dslice.byteswap()
             fileobj.write(out_arr.tostring())
         else:
+            if needs_rint:
+                dslice = np.rint(dslice)
             fileobj.write(dslice.astype(out_dtype).tostring())
 
 
@@ -618,10 +642,10 @@ def calculate_scale(data, out_dtype, allow_intercept):
     Parameters
     ----------
     data : array
-    out_dtype : dtype
-       output data type
+    out_dtype : dtype specifier
+        output data type (will be passed to np.dtype)
     allow_intercept : bool
-       If True allow non-zero intercept
+        If True allow non-zero intercept
 
     Returns
     -------
@@ -638,6 +662,7 @@ def calculate_scale(data, out_dtype, allow_intercept):
     '''
     default_ret = (1.0, 0.0, None, None)
     in_dtype = data.dtype
+    out_dtype = np.dtype(out_dtype)
     if np.can_cast(in_dtype, out_dtype):
         return default_ret
     in_type = in_dtype.type

@@ -162,6 +162,61 @@ def test_array_to_file():
     assert_array_equal(data_back, np.zeros(arr.shape))
 
 
+def test_a2f_mn_mx():
+    # Test array to file mn, mx handling
+    arr = np.arange(6, dtype=np.int16)
+    arr_orig = arr.copy() # safe backup for testing against
+    str_io = BytesIO()
+    # Basic round trip to warm up
+    array_to_file(arr, str_io)
+    data_back = array_from_file(arr.shape, np.int16, str_io)
+    assert_array_equal(arr, data_back)
+    # Clip low
+    array_to_file(arr, str_io, mn=2)
+    data_back = array_from_file(arr.shape, np.int16, str_io)
+    # arr unchanged
+    assert_array_equal(arr, arr_orig)
+    # returned value clipped low
+    assert_array_equal(data_back, [2,2,2,3,4,5])
+    # Clip high
+    array_to_file(arr, str_io, mx=4)
+    data_back = array_from_file(arr.shape, np.int16, str_io)
+    # arr unchanged
+    assert_array_equal(arr, arr_orig)
+    # returned value clipped high
+    assert_array_equal(data_back, [0,1,2,3,4,4])
+    # Clip both
+    array_to_file(arr, str_io, mn=2, mx=4)
+    data_back = array_from_file(arr.shape, np.int16, str_io)
+    # arr unchanged
+    assert_array_equal(arr, arr_orig)
+    # returned value clipped high
+    assert_array_equal(data_back, [2,2,2,3,4,4])
+
+
+def test_a2f_nan2zero():
+    # Test conditions under which nans written to zero
+    arr = np.array([np.nan, 99.], dtype=np.float32)
+    str_io = BytesIO()
+    array_to_file(arr, str_io)
+    data_back = array_from_file(arr.shape, np.float32, str_io)
+    assert_array_equal(np.isnan(data_back), [True, False])
+    # nan2zero ignored for floats
+    array_to_file(arr, str_io, nan2zero=True)
+    data_back = array_from_file(arr.shape, np.float32, str_io)
+    assert_array_equal(np.isnan(data_back), [True, False])
+    # Integer output without
+    array_to_file(arr, str_io, np.int32, nan2zero=False)
+    data_back = array_from_file(arr.shape, np.int32, str_io)
+    crude_conv = np.array([np.nan, 99]).astype(np.int32)
+    assert_true(crude_conv[0] != 0)
+    assert_array_equal(data_back, crude_conv)
+    # Integer output with
+    array_to_file(arr, str_io, np.int32, nan2zero=True)
+    data_back = array_from_file(arr.shape, np.int32, str_io)
+    assert_array_equal(data_back, [0, 99])
+
+
 def type_min_max(dtype_type):
     # Utility routine to return min, max for dtype dtype
     if dtype_type in (np.sctypes['complex'] + np.sctypes['float']):
@@ -182,6 +237,7 @@ def test_scaling_in_abstract():
         for in_type in np.sctypes[category0]:
             for out_type in np.sctypes[category1]:
                 check_int_conv(in_type, out_type)
+                check_int_a2f(in_type, out_type)
     # Converting floats to integer
     # Work in progress
 
@@ -197,16 +253,36 @@ def check_int_conv(in_type, out_type):
     res = (data - inter) / scale
     back = np.rint(res).astype(out_type) * scale + inter
     assert_true(np.allclose(data, back))
-    # Try different method of applying scale and inter
-    res = data / scale - inter / scale
-    back = np.rint(res).astype(out_type) * scale + inter
+    # Check actual scaling as it will be applied
+    scale32 = np.float32(scale)
+    inter32 = np.float32(inter)
+    back = np.rint(res).astype(out_type) * scale32 + inter32
     assert_true(np.allclose(data, back))
+
+
+def check_int_a2f(in_type, out_type):
+    # Check that array to file returns roughly the same
+    big_floater = np.maximum_sctype(np.float)
+    this_min, this_max = type_min_max(in_type)
+    data = np.array([this_min, this_max], in_type)
+    str_io = BytesIO()
+    scale, inter, mn, mx = calculate_scale(data, out_type, True)
     # Try with analyze-size scale and inter
+    array_to_file(data, str_io, out_type, 0, inter, scale, mn, mx)
+    data_back = array_from_file(data.shape, out_type, str_io)
+    if not scale is None and scale !=1.0:
+        data_back = data_back * scale
+    if not inter is None and inter !=0:
+        data_back = data_back + inter
+    assert_true(np.allclose(big_floater(data), big_floater(data_back)))
     scale = np.float32(scale)
     inter = np.float32(inter)
-    res = (data - inter) / scale
-    back = res * scale + inter
-    assert_true(np.allclose(data, back))
+    data_back = array_from_file(data.shape, out_type, str_io)
+    if not scale is None and scale !=1.0:
+        data_back = data_back * scale
+    if not inter is None and inter !=0:
+        data_back = data_back + inter
+    assert_true(np.allclose(big_floater(data), big_floater(data_back)))
 
 
 def write_return(data, fileobj, out_dtype, *args, **kwargs):

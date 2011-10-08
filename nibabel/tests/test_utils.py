@@ -239,35 +239,76 @@ def test_scaling_in_abstract():
                 check_int_conv(in_type, out_type)
                 check_int_a2f(in_type, out_type)
     # Converting floats to integer
-    # Work in progress
+    for category0, category1 in (('float', 'int'),
+                                 ('float', 'uint'),
+                                 ('complex', 'int'),
+                                 ('complex', 'uint'),
+                                ):
+        for in_type in np.sctypes[category0]:
+            for out_type in np.sctypes[category1]:
+                check_int_conv(in_type, out_type)
+                check_int_a2f(in_type, out_type)
 
 
 def check_int_conv(in_type, out_type):
     # Test that input and output are the same with scaling, intercept
     this_min, this_max = type_min_max(in_type)
-    data = np.array([this_min, this_max], in_type)
+    out_min, out_max = type_min_max(out_type)
+    if not in_type in np.sctypes['complex']:
+        data = np.array([this_min, this_max], in_type)
+    else: # Funny behavior with complex256
+        data = np.zeros((2,), in_type)
+        data[0] = this_min + 0j
+        data[1] = this_max + 0j
     out_dtype = np.dtype(out_type)
     scale, inter, mn, mx = calculate_scale(data, out_dtype, True)
+    if scale == np.inf or inter == np.inf:
+        return
     if scale == 1.0 and inter == 0.0:
         return
-    res = (data - inter) / scale
-    back = np.rint(res).astype(out_type) * scale + inter
-    assert_true(np.allclose(data, back))
+    # Simulate float casting
+    cast_dtype = np.array(inter / scale).dtype
+    cast_type = cast_dtype.type
+    if in_type in np.sctypes['float'] + np.sctypes['complex']:
+        res = data.astype(cast_dtype)
+    else:
+        res = data.copy()
+    # Thresholding; assume mx not None if mn is not None
+    if mn:
+        np.clip(res, mn, mx, res)
+    res = res / scale - inter / scale
+    # simulate rint clipping
+    rinted = np.rint(res)
+    if mn == 'out_min' or mx == 'out_mx':
+        lo_clip, hi_clip = [np.array(v, out_dtype).astype(cast_type)
+                            for v in out_min, out_max]
+        np.clip(rinted, lo_clip, hi_clip, rinted)
+    raw_back = rinted.astype(out_type)
+    scaled_back = raw_back * scale + inter
+    assert_true(np.allclose(data, scaled_back))
     # Check actual scaling as it will be applied
     scale32 = np.float32(scale)
     inter32 = np.float32(inter)
-    back = np.rint(res).astype(out_type) * scale32 + inter32
-    assert_true(np.allclose(data, back))
+    if scale32 == np.inf or inter32 == np.inf:
+        return
+    scaled_back = raw_back * scale32 + inter32
+    assert_true(np.allclose(data, clip_infs(scaled_back)))
 
 
 def check_int_a2f(in_type, out_type):
     # Check that array to file returns roughly the same
     big_floater = np.maximum_sctype(np.float)
     this_min, this_max = type_min_max(in_type)
-    data = np.array([this_min, this_max], in_type)
+    if not in_type in np.sctypes['complex']:
+        data = np.array([this_min, this_max], in_type)
+    else: # Funny behavior with complex256
+        data = np.zeros((2,), in_type)
+        data[0] = this_min + 0j
+        data[1] = this_max + 0j
     str_io = BytesIO()
     scale, inter, mn, mx = calculate_scale(data, out_type, True)
-    # Try with analyze-size scale and inter
+    if scale == np.inf or inter == np.inf:
+        return
     array_to_file(data, str_io, out_type, 0, inter, scale, mn, mx)
     data_back = array_from_file(data.shape, out_type, str_io)
     if not scale is None and scale !=1.0:
@@ -275,14 +316,56 @@ def check_int_a2f(in_type, out_type):
     if not inter is None and inter !=0:
         data_back = data_back + inter
     assert_true(np.allclose(big_floater(data), big_floater(data_back)))
-    scale = np.float32(scale)
-    inter = np.float32(inter)
+    # Try with analyze-size scale and inter
+    scale32 = np.float32(scale)
+    inter32 = np.float32(inter)
+    if scale32 == np.inf or inter32 == np.inf:
+        return
     data_back = array_from_file(data.shape, out_type, str_io)
     if not scale is None and scale !=1.0:
         data_back = data_back * scale
     if not inter is None and inter !=0:
         data_back = data_back + inter
-    assert_true(np.allclose(big_floater(data), big_floater(data_back)))
+    assert_true(np.allclose(big_floater(data),
+                            big_floater(clip_infs(data_back))))
+
+
+def clip_infs(arr):
+    # Clips arrays at maximum value and thus removes infs
+    dtt = arr.dtype.type
+    try:
+        info = np.finfo(dtt)
+    except ValueError:
+        return arr
+    return np.clip(arr, info.min, info.max)
+
+
+def test_array_file_scales():
+    # Test scaling works for max, min when going from larger to smaller type,
+    # and from float to integer.
+    bio = BytesIO()
+    for in_type, out_type, err in ((np.int16, np.int16, None),
+                                   (np.int16, np.int8, None),
+                                   (np.uint16, np.uint8, None),
+                                   (np.int32, np.int8, None),
+                                   (np.float32, np.uint8, None),
+                                   (np.float32, np.int16, None)):
+        out_dtype = np.dtype(out_type)
+        arr = np.zeros((3,), dtype=in_type)
+        arr[0], arr[1] = type_min_max(in_type)
+        if not err is None:
+            assert_raises(err, calculate_scale, arr, out_dtype, True)
+            continue
+        slope, inter, mn, mx = calculate_scale(arr, out_dtype, True)
+        array_to_file(arr, bio, out_type, 0, inter, slope, mn, mx)
+        bio.seek(0)
+        arr2 = array_from_file(arr.shape, out_dtype, bio)
+        arr3 = arr2 * slope + inter
+        # Max rounding error for integer type
+        max_miss = slope / 2.
+        assert_true(np.all(np.abs(arr - arr3) <= max_miss))
+        bio.truncate(0)
+        bio.seek(0)
 
 
 def write_return(data, fileobj, out_dtype, *args, **kwargs):
@@ -374,7 +457,7 @@ def test_finite_range():
     a = np.array([[1, 0, 1],[2,3,4]], dtype=np.uint)
     assert_equal(finite_range(a), (0, 4))
     a = a + 1j
-    assert_raises(TypeError, finite_range, a)
+    assert_equal(finite_range(a), (0+1j, 4+1j))
     # 1D case
     a = np.array([0., 1, 2, 3])
     assert_equal(finite_range(a), (0,3))

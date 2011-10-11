@@ -15,6 +15,7 @@ import bz2
 import numpy as np
 
 from .py3k import isfileobj, ZEROB
+from .floating import floor_exact, FloatingError
 
 sys_is_le = sys.byteorder == 'little'
 native_code = sys_is_le and '<' or '>'
@@ -505,7 +506,8 @@ def array_from_file(shape, in_dtype, infile, offset=0, order='F'):
 
 def array_to_file(data, fileobj, out_dtype=None, offset=0,
                   intercept=0.0, divslope=1.0,
-                  mn=None, mx=None, order='F', nan2zero=True):
+                  mn=None, mx=None, order='F', nan2zero=True,
+                  sc_mn=None, sc_mx=None):
     ''' Helper function for writing arrays to disk
 
     Writes arrays as scaled by `intercept` and `divslope`, and clipped
@@ -548,6 +550,14 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
        does when casting, and this can be odd (often the lowest
        available integer value).  This parameter ignored for floating point
        output.
+    sc_mn : None or float, optional
+        Minimum value at which scaled data should be clipped prior to type
+        casting, but after application of intercept and scale.  Only effective
+        for integer output types.  If None, do not clip.
+    sc_mx : None or float, optional
+        Maximum value at which scaled data should be clipped prior to type
+        casting, but after application of intercept and scale.  Only effective
+        for integer output types.  If None, do not clip.
 
     Notes
     -----
@@ -586,6 +596,8 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
         out_dtype = in_dtype
     else:
         out_dtype = np.dtype(out_dtype)
+    if not sc_mn is None and sc_mx is None:
+        raise ValueError('sc_mx should be present if sc_mn not None')
     in_type = in_dtype.type
     out_type = out_dtype.type
     try:
@@ -606,7 +618,10 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
     nan2zero = (nan2zero and
                 in_type in floating_point_types and
                 out_type not in floating_point_types)
-    needs_copy = nan2zero or mx or mn
+    # Clipping after scaling
+    scaled_clip = out_type in integer_types and not sc_mn is None
+    # Copy to protect from writing into the input array
+    needs_copy = nan2zero or mx or mn or scaled_clip
     # Other test shortcuts
     mnmx = mn and mx
     correct_dtype = in_dtype == out_dtype
@@ -623,7 +638,7 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
         casting = have_slope or have_inter
     else:
         casting = False
-    # Whether to round before conversion
+    # Whether to round before casting
     needs_rint = (out_type in integer_types and
                   (in_type in integer_types or
                    have_slope or have_inter))
@@ -653,6 +668,8 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
             dslice = dslice - intercept
         elif have_slope:
             dslice = dslice / divslope
+        if scaled_clip:
+            np.clip(dslice, sc_mn, sc_mx, dslice)
         if correct_dtype:
             fileobj.write(dslice.tostring())
         elif only_byte_swapped:
@@ -664,7 +681,11 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
             fileobj.write(dslice.astype(out_dtype).tostring())
 
 
-def calculate_scale(data, out_dtype, allow_intercept):
+class ScalingError(Exception):
+    pass
+
+
+def calculate_scale(data, out_dtype, allow_intercept, check_range=False):
     ''' Calculate scaling and optional intercept for data
 
     Parameters
@@ -674,6 +695,9 @@ def calculate_scale(data, out_dtype, allow_intercept):
         output data type (will be passed to np.dtype)
     allow_intercept : bool
         If True allow non-zero intercept
+    check_range : {False, True}, optional
+        If True, check range of scaled values, and return extra pair of values
+        for clipping the scaled values
 
     Returns
     -------
@@ -687,8 +711,16 @@ def calculate_scale(data, out_dtype, allow_intercept):
     mx : None or float
        minimum of finite value in data, or None if this will not
        be used to threshold data
+    scaled_min : None or float
+        Minimum for the data after scaling.  Returned if `check_range` is True.
+        None means, don't check
+    scaled_max : None or float
+        Maximum for the data after scaling.  Returned if `check_range` is True.
+        None means, don't check
     '''
-    default_ret = (1.0, 0.0, None, None)
+    default_ret = [1.0, 0.0, None, None]
+    if check_range:
+        default_ret += [None, None]
     in_dtype = data.dtype
     out_dtype = np.dtype(out_dtype)
     if np.can_cast(in_dtype, out_dtype):
@@ -700,7 +732,7 @@ def calculate_scale(data, out_dtype, allow_intercept):
     # We have an int or uint output type
     mn, mx = finite_range(data)
     if mn == np.inf: # No valid data
-        return None, None, None, None
+        return [None, None] + default_ret[2:]
     out_info = np.iinfo(out_type)
     out_type_min = out_info.min
     out_type_max = out_info.max
@@ -711,56 +743,49 @@ def calculate_scale(data, out_dtype, allow_intercept):
             return default_ret
         # int in type, uint out type
         if out_type_min == 0:
-            if mx < 0 and abs(mn) <= out_type_max:
+            if mx <= 0 and abs(mn) <= out_type_max:
                 # Sign flip will do it
-                return -1.0, 0.0, None, None
+                return [-1.0] + default_ret[1:]
             if mn < 0 and mx > 0:
                 if not allow_intercept:
-                    raise ValueError('Cannot scale negative and positive '
-                                     'numbers to uint without intercept')
+                    raise ScalingError('Cannot scale negative and positive '
+                                       'numbers to uint without intercept')
                 # Maybe an intercept of the min will be enough
                 intercept = float(mn)
                 if (mx - intercept) <= out_type_max:
-                    return 1.0, intercept, None, None
+                    return [1.0, intercept] + default_ret[2:]
                 # Oh well, we'll have to calculate scaling
         # Also need scaling if going from big uint / int to smaller one
-        scaling, intercept = scale_min_max(mn, mx, out_type, allow_intercept)
-        return scaling, intercept, None, None
+        if check_range:
+            scaling, intercept, scaled_mn, scaled_mx = scale_min_max(
+                mn, mx, out_type, allow_intercept, True, in_type)
+            return [scaling, intercept, None, None, scaled_mn, scaled_mx]
+        scaling, intercept  = scale_min_max(
+            mn, mx, out_type, allow_intercept, False, in_type)
+        return [scaling, intercept, None, None]
     # should now be scaling a fp type to an int type
-    assert in_type in floating_point_types
-    scaling, intercept = scale_min_max(mn, mx, out_type, allow_intercept)
-    # Final check whether we will overflow
-    if allow_intercept:
-        cast_dtype = np.asarray(intercept / scaling).dtype
-        check_data = np.array([mn, mx], cast_dtype)
-        res = check_data / scaling - intercept / scaling
-        out_mn, out_mx = np.rint(res)
-        if out_mn < out_type_min:
-            mn = np.array(out_type_min, out_dtype).astype(cast_dtype)
-            mn = (mn + intercept / scaling) * scaling
-        if out_mx > out_type_max:
-            mx= np.array(out_type_max, out_dtype).astype(cast_dtype)
-            mx = (mx + intercept / scaling) * scaling
-    else: # No intercept
-        cast_dtype = np.asarray(scaling).dtype
-        check_data = np.array([mn, mx], cast_dtype)
-        res = check_data / scaling
-        out_mn, out_mx = np.rint(res)
-        if out_mn < out_type_min:
-            mn = np.array(out_type_min, out_dtype).astype(cast_dtype)
-            mn = mn * scaling
-        if out_mx > out_type_max:
-            mx = np.array(out_type_max, out_dtype).astype(cast_dtype)
-            mx = mx * scaling
-    return scaling, intercept, mn, mx
+    if check_range:
+        scaling, intercept, scaled_mn, scaled_mx = scale_min_max(
+            mn, mx, out_type, allow_intercept, check_range, in_type)
+        if (scaled_mn, scaled_mx) == (None, None):
+            # Turn off prescale range checking - it's for infs
+            mn, mx = None, None
+        return [scaling, intercept, mn, mx, scaled_mn, scaled_mx]
+    scaling, intercept  = scale_min_max(
+        mn, mx, out_type, allow_intercept, False, in_type)
+    return [scaling, intercept, mn, mx]
 
 
-def scale_min_max(mn, mx, out_type, allow_intercept, working_type=None):
+def scale_min_max(mn, mx, out_type, allow_intercept, check_range=False,
+                  in_type=None):
     ''' Return scaling and intercept min, max of data, given output type
 
     Returns ``scalefactor`` and ``intercept`` to best fit data with
     given ``mn`` and ``mx`` min and max values into range of data type
     with ``type_min`` and ``type_max`` min and max values for type.
+
+    Optionally return modified thresholds for min and max after checking for
+    potiential integer overflow.
 
     The calculated scaling is therefore::
 
@@ -777,8 +802,12 @@ def scale_min_max(mn, mx, out_type, allow_intercept, working_type=None):
     allow_intercept : bool
        If true, allow calculation of non-zero intercept.  Otherwise,
        returned intercept is always 0.0
-    working_type : None or numpy type, optional
-        default is maximum floating point type
+    check_range : {False, True}, optional
+        If True, check scaled range fits within output dtype.  Return thresholds
+        in for scaled data at which to clip to fit (see below)
+    in_type : None or numpy type
+        Dtype of input values.  If None, try and work it out from passed `mn`
+        and `mx`
 
     Returns
     -------
@@ -786,13 +815,23 @@ def scale_min_max(mn, mx, out_type, allow_intercept, working_type=None):
        scalefactor by which to divide data after subtracting intercept
     intercept : numpy scalar, dtype=np.maximum_sctype(np.float)
        value to subtract from data before dividing by scalefactor
+    scaled_out_mn : None or scalar
+        (Returned only if `check_range` is True); min threshold to clip *scaled*
+        data to stay within output dtype range.  None if no extra clipping is
+        necesary
+    scaled_out_mx : None or scalar
+        (Returned only if `check_range` is True); max threshold to clip *scaled*
+        data to stay within output dtype range.  None if no extra clipping is
+        necessary
 
+    Examples
+    --------
     >>> scale_min_max(0, 255, np.uint8, False)
-    (1.0, 0.0)
+    [1.0, 0.0]
     >>> scale_min_max(-128, 127, np.int8, False)
-    (1.0, 0.0)
+    [1.0, 0.0]
     >>> scale_min_max(0, 127, np.int8, False)
-    (1.0, 0.0)
+    [1.0, 0.0]
     >>> scaling, intercept = scale_min_max(0, 127, np.int8,  True)
     >>> np.allclose((0 - intercept) / scaling, -128)
     True
@@ -814,44 +853,99 @@ def scale_min_max(mn, mx, out_type, allow_intercept, working_type=None):
     The large integers lead to python long types as max / min for type.
     To contain the rounding error, we need to use the maximum numpy
     float types when casting to float.
-
     '''
-    if working_type is None:
-        working_type = np.maximum_sctype(np.float)
     if mn > mx:
         raise ValueError('min value > max value')
-    try:
-        info = np.iinfo(out_type)
-    except ValueError:
-        info = np.finfo(out_type)
-    mn, mx, type_min, type_max = np.array([mn, mx, info.min, info.max],
-                                          dtype=working_type)
+    # We only handle integers
+    info = np.iinfo(out_type)
+    if in_type is None:
+        in_vals = np.array([mn, mx])
+        in_type = in_vals.dtype.type
+    else:
+        in_vals = np.array([mn, mx], in_type)
+    # use 64 bit floats for working calculations unless we're working on
+    # something huge
+    if in_type in floating_point_types:
+        if in_type in np.sctypes['complex']:
+            my_types = np.sctypes['complex']
+        else:
+            my_types = np.sctypes['float']
+        max_type = np.maximum_sctype(in_type)
+        if max_type == in_type:
+            work_type = in_type
+        else:
+            my_ind = my_types.index(in_type)
+            work_type = my_types[my_ind+1]
+    else: # Integer input type
+        max_type = np.maximum_sctype(np.float)
+        both_type = np.promote_types(in_type, out_type)
+        if both_type.itemsize >= 8:
+            work_type = np.float64
+        else:
+            work_type = np.float32
+    out_type_min, out_type_max = info.min, info.max
+    work_mn_mx = np.array(in_vals, max_type)
+    work_mn, work_mx = work_mn_mx
+    work_type_min, work_type_max = np.array(
+        [out_type_min, out_type_max], max_type)
+    # Return values for check_range
+    if check_range:
+        ret_mn_mx = [None, None]
+        work_vals = np.array([mn, mx], work_type)
+    else:
+        ret_mn_mx = []
     # with intercept
     if allow_intercept:
-        data_range = mx-mn
+        data_range = work_mx - work_mn
         if data_range == 0:
-            return 1.0, mn
-        type_range = type_max - type_min
+            return [1.0, mn] + ret_mn_mx
+        type_range = work_type_max - work_type_min
         scaling = data_range / type_range
-        intercept = mn - type_min * scaling
-        return scaling, intercept
+        scaling = np.array(scaling, dtype=work_type)
+        if not np.isfinite(scaling):
+            raise ScalingError('Non finite scaling')
+        intercept = work_mn - work_type_min * scaling
+        intercept = np.array(intercept, dtype=work_type)
+        if not np.isfinite(intercept):
+            raise ScalingError('Non finite intecept')
+        if check_range: # Will we overflow the out type range?
+            # Try the scaling to see what happens to the values
+            res = work_vals / scaling - intercept / scaling
+            if int(res[0]) < out_type_min or int(res[1]) > out_type_max:
+                try:
+                    ret_mn_mx[0] = floor_exact(out_type_min, work_type)
+                    ret_mn_mx[1] = floor_exact(out_type_max, work_type)
+                except FloatingError:
+                    raise ScalingError("Can't floor this type")
+        return [scaling, intercept] + ret_mn_mx
     # without intercept
     if mx == 0 and mn == 0:
-        return 1.0, 0.0
-    if type_min == 0: # uint
+        return [1.0, 0.0] + ret_mn_mx
+    if out_type_min == 0: # uint
         if mn < 0 and mx > 0:
-            raise ValueError('Cannot scale negative and positive '
-                             'numbers to uint without intercept')
+            raise ScalingError('Cannot scale negative and positive '
+                               'numbers to uint without intercept')
         if mx < 0:
-            scaling = mn / type_max
+            scaling = work_mn / work_type_max
         else:
-            scaling = mx / type_max
+            scaling = work_mx / work_type_max
     else: # int
         if abs(mx) >= abs(mn):
-            scaling = mx / type_max
+            scaling = work_mx / work_type_max
         else:
-            scaling = mn / type_min
-    return scaling, 0.0
+            scaling = work_mn / work_type_min
+    scaling = np.array(scaling, dtype=work_type)
+    if not np.isfinite(scaling):
+        raise ScalingError('Non finite scaling')
+    if check_range: # Will we overflow the out type range?
+        res = work_vals / scaling
+        if int(res[0]) < out_type_min or int(res[1]) > out_type_max:
+            try:
+                ret_mn_mx[0] = floor_exact(out_type_min, work_type)
+                ret_mn_mx[1] = floor_exact(out_type_max, work_type)
+            except FloatingError:
+                raise ScalingError("Can't floor this type")
+    return [scaling, 0.0] + ret_mn_mx
 
 
 def finite_range(arr):
@@ -884,9 +978,7 @@ def finite_range(arr):
     (0, 4)
     >>> a = a + 1j
     >>> finite_range(a)
-    Traceback (most recent call last):
-       ...
-    TypeError: Can only handle floats and (u)ints
+    (1j, (4+1j))
     '''
     # Resort array to slowest->fastest memory change indices
     stride_order = np.argsort(arr.strides)[::-1]

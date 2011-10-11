@@ -15,8 +15,10 @@ import numpy as np
 
 from ..tmpdirs import InTemporaryDirectory
 
+from ..floating import floor_exact
 from ..volumeutils import (array_from_file,
                            array_to_file,
+                           ScalingError,
                            calculate_scale,
                            scale_min_max,
                            finite_range,
@@ -30,7 +32,8 @@ from numpy.testing import (assert_array_almost_equal,
                            assert_almost_equal,
                            assert_array_equal)
 
-from nose.tools import assert_true, assert_equal, assert_raises
+from nose.tools import (assert_true, assert_equal, assert_raises,
+                        assert_not_equal)
 
 
 def test_array_from_file():
@@ -162,6 +165,24 @@ def test_array_to_file():
     assert_array_equal(data_back, np.zeros(arr.shape))
 
 
+def test_a2f_clipping():
+    # Check scaled range clipping
+    arr = np.arange(10).astype(np.int32)
+    arr_orig = arr.copy() # check for overwriting
+    str_io = BytesIO()
+    array_to_file(arr, str_io, sc_mn=2, sc_mx=8)
+    data_back = array_from_file(arr.shape, np.int32, str_io)
+    assert_array_equal(arr, arr_orig)
+    assert_array_equal(data_back, [2,2,2,3,4,5,6,7,8,8])
+    array_to_file(arr, str_io, np.int16, sc_mn=2, sc_mx=8)
+    data_back = array_from_file(arr.shape, np.int16, str_io)
+    assert_array_equal(data_back, [2,2,2,3,4,5,6,7,8,8])
+    array_to_file(arr, str_io, np.int16, intercept=-1.0, sc_mn=2, sc_mx=8)
+    data_back = array_from_file(arr.shape, np.int16, str_io)
+    assert_array_equal(data_back, [2,2,3,4,5,6,7,8,8,8])
+    assert_array_equal(arr, arr_orig)
+
+
 def test_a2f_mn_mx():
     # Test array to file mn, mx handling
     arr = np.arange(6, dtype=np.int16)
@@ -246,8 +267,11 @@ def test_scaling_in_abstract():
                                 ):
         for in_type in np.sctypes[category0]:
             for out_type in np.sctypes[category1]:
-                check_int_conv(in_type, out_type)
-                check_int_a2f(in_type, out_type)
+                try:
+                    check_int_conv(in_type, out_type)
+                    check_int_a2f(in_type, out_type)
+                except ScalingError:
+                    print 'Scaling failed for %s to %s' % (in_type, out_type)
 
 
 def check_int_conv(in_type, out_type):
@@ -261,28 +285,27 @@ def check_int_conv(in_type, out_type):
         data[0] = this_min + 0j
         data[1] = this_max + 0j
     out_dtype = np.dtype(out_type)
-    scale, inter, mn, mx = calculate_scale(data, out_dtype, True)
+    scale, inter, mn, mx, sc_mn, sc_mx = calculate_scale(data, out_dtype,
+                                                         True, True)
     if scale == np.inf or inter == np.inf:
         return
     if scale == 1.0 and inter == 0.0:
         return
     # Simulate float casting
     cast_dtype = np.array(inter / scale).dtype
-    cast_type = cast_dtype.type
     if in_type in np.sctypes['float'] + np.sctypes['complex']:
         res = data.astype(cast_dtype)
     else:
         res = data.copy()
     # Thresholding; assume mx not None if mn is not None
-    if mn:
+    if not mn is None:
         np.clip(res, mn, mx, res)
     res = res / scale - inter / scale
-    # simulate rint clipping
+    # Simulate scaled thresholding
+    if not sc_mn is None:
+        np.clip(res, sc_mn, sc_mx, res)
+    # Simulate rinting
     rinted = np.rint(res)
-    if mn == 'out_min' or mx == 'out_mx':
-        lo_clip, hi_clip = [np.array(v, out_dtype).astype(cast_type)
-                            for v in out_min, out_max]
-        np.clip(rinted, lo_clip, hi_clip, rinted)
     raw_back = rinted.astype(out_type)
     scaled_back = raw_back * scale + inter
     assert_true(np.allclose(data, scaled_back))
@@ -306,10 +329,12 @@ def check_int_a2f(in_type, out_type):
         data[0] = this_min + 0j
         data[1] = this_max + 0j
     str_io = BytesIO()
-    scale, inter, mn, mx = calculate_scale(data, out_type, True)
+    scale, inter, mn, mx, sc_mn, sc_mx = calculate_scale(data, out_type,
+                                                         True, True)
     if scale == np.inf or inter == np.inf:
         return
-    array_to_file(data, str_io, out_type, 0, inter, scale, mn, mx)
+    array_to_file(data, str_io, out_type, 0, inter, scale, mn, mx,
+                  sc_mn=sc_mn, sc_mx=sc_mx)
     data_back = array_from_file(data.shape, out_type, str_io)
     if not scale is None and scale !=1.0:
         data_back = data_back * scale
@@ -423,6 +448,94 @@ def test_scale_min_max():
                 assert_array_almost_equal, mx / scale, imax
             else:
                 assert_array_almost_equal, mn / scale, imin
+
+
+def test_calc_scale():
+    # Test calculate scale routine
+    i16i = np.iinfo(np.int16)
+    i64i = np.iinfo(np.int64)
+    u64i = np.iinfo(np.uint64)
+    # scaling should scale to full range
+    scale, inter = scale_min_max(0, i64i.max, np.uint64, False)
+    assert_equal((scale, inter), (0.5, 0.0))
+    # calc scale should shortcut this because we gain no precision
+    data = np.array([0, i64i.max], dtype=np.int64)
+    scale, inter, mn, mx = calculate_scale(data, np.uint64, False)
+    assert_equal((scale, inter, mn, mx), (1.0, 0.0, None, None))
+    # Even if we allow an intercept
+    scale, inter, mn, mx = calculate_scale(data, np.uint64, True)
+    assert_equal((scale, inter), (1.0, 0.0))
+    # Trying to scale neg, pos without intercept kicks error
+    assert_raises(ScalingError, scale_min_max, -1, 1, np.uint64, False)
+    data = np.array([-1, 1], dtype=np.int64)
+    assert_raises(ScalingError, calculate_scale, data, np.uint64, False)
+    # But it's OK with an intercept
+    scale, inter = scale_min_max(i64i.min, i64i.max, np.uint64, True)
+    assert_equal((scale, inter), (1.0, i64i.min))
+    i64_data = np.array([i64i.min, i64i.max], dtype=np.int64)
+    scale, inter, mn, mx = calculate_scale(i64_data, np.uint64, True)
+    assert_equal((scale, inter, mn, mx), (1.0, i64i.min, None, None))
+    # Check in_type works as passed parameter
+    scale, inter = scale_min_max(-1.5, 1.5, np.int8, True)
+    assert_almost_equal((scale, inter), (3.0/255, 128./255*3.0-1.5))
+    # Now floats should be truncated
+    scale, inter = scale_min_max(-1.5, 1.5, np.int8, True, in_type=np.int8)
+    assert_almost_equal((scale, inter), (2.0/255, 128./255*2.0-1))
+    # Check range checking output
+    # This first shouldn't be controversial
+    scale, inter, sc_mn, sc_mx = scale_min_max(
+        i16i.min, i16i.max, np.int16, False, True)
+    assert_equal((scale, inter, sc_mn, sc_mx), (1.0, 0.0, None, None))
+    i16_data = np.array([i16i.min, i16i.max], dtype=np.int16)
+    scale, inter, mn, mx, sc_mn, sc_mx = calculate_scale(i16_data, np.int16,
+                                                         False, True)
+    assert_equal((scale, inter, sc_mn, sc_mx), (1.0, 0.0, None, None))
+    # This will (at least on my laptop) run into range errors with rounding We
+    # need to pass in the in_type to calc_scale, because it appears that
+    # u64i.max becomes an object by default when cast into an array.
+    scale, inter, out_mn, out_mx = scale_min_max(0, u64i.max, np.int64,
+                                                 True, True, np.uint64)
+    # Assert we do need the range check (float rounding above max for dtype)
+    work_type = np.array(scale).dtype.type
+    default_scaled = work_type(u64i.max) / scale - inter / scale
+    floored_scaled = floor_exact(i64i.max, work_type)
+    assert_true(int(default_scaled) > i64i.max)
+    # Check the floored check worked
+    assert_not_equal(floored_scaled, default_scaled)
+    assert_equal((scale, inter, out_mn, out_mx),
+                 (1.0, -i64i.min, i64i.min, floored_scaled))
+    # Calc scale version.
+    u64_data = np.array([0, u64i.max], dtype=np.uint64)
+    scale, inter, mn, mx, sc_mn, sc_mx = calculate_scale(u64_data, np.int64,
+                                                         True, True)
+    assert_equal((scale, inter, mn, mx, sc_mn, sc_mx),
+                 (1.0, -i64i.min, None, None, i64i.min, floored_scaled))
+    # Simple no-scale cases
+    # in-range
+    vals = calculate_scale(np.array([0, 1], dtype=np.int64), np.uint8,
+                           False, False)
+    assert_equal(vals, [1.0, 0.0, None, None])
+    vals = calculate_scale(np.array([0, 1], dtype=np.int64), np.uint8,
+                           False, True)
+    assert_equal(vals, [1.0, 0.0, None, None, None, None])
+    # Sign flip
+    vals = calculate_scale(np.array([0, -1], dtype=np.int64), np.uint8,
+                           False, False)
+    assert_equal(vals, [-1.0, 0.0, None, None])
+    vals = calculate_scale(np.array([0, -1], dtype=np.int64), np.uint8,
+                           False, True)
+    assert_equal(vals, [-1.0, 0.0, None, None, None, None])
+    # Just intercept
+    vals = calculate_scale(np.array([-1, 1], dtype=np.int64), np.uint8,
+                           True, False)
+    assert_equal(vals, [1.0, -1.0, None, None])
+    vals = calculate_scale(np.array([-1, 1], dtype=np.int64), np.uint8,
+                           True, True)
+    assert_equal(vals, [1.0, -1.0, None, None, None, None])
+    # No valid data
+    vals = calculate_scale(np.array([np.nan, np.nan], dtype=np.float),
+                           np.uint8, True, False)
+    assert_equal(vals, [None, None, None, None])
 
 
 def test_can_cast():

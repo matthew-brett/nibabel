@@ -685,7 +685,8 @@ class ScalingError(Exception):
     pass
 
 
-def calculate_scale(data, out_dtype, allow_intercept, check_range=False):
+def calculate_scale(data, out_dtype, allow_intercept, check_range=False,
+                    work_type=None):
     ''' Calculate scaling and optional intercept for data
 
     Parameters
@@ -698,13 +699,18 @@ def calculate_scale(data, out_dtype, allow_intercept, check_range=False):
     check_range : {False, True}, optional
         If True, check range of scaled values, and return extra pair of values
         for clipping the scaled values
+    work_type : None or numpy type
+        Dtype of inter / scale working type.  If None, try and work out a
+        sensible default
 
     Returns
     -------
     scaling : None or float
-       scalefactor to divide into data.  None if no valid data
+       scalefactor to divide into data.  None if no valid data. Dtype is
+       `work_type` (or calculated default for `work_type`)
     intercept : None or float
-       intercept to subtract from data.  None if no valid data
+       intercept to subtract from data.  None if no valid data. Dtype is
+       `work_type` (or calculated default for `work_type`)
     mn : None or float
        minimum of finite value in data or None if this will not
        be used to threshold data
@@ -758,26 +764,26 @@ def calculate_scale(data, out_dtype, allow_intercept, check_range=False):
         # Also need scaling if going from big uint / int to smaller one
         if check_range:
             scaling, intercept, scaled_mn, scaled_mx = scale_min_max(
-                mn, mx, out_type, allow_intercept, True, in_type)
+                mn, mx, out_type, allow_intercept, True, in_type, work_type)
             return [scaling, intercept, None, None, scaled_mn, scaled_mx]
         scaling, intercept  = scale_min_max(
-            mn, mx, out_type, allow_intercept, False, in_type)
+            mn, mx, out_type, allow_intercept, False, in_type, work_type)
         return [scaling, intercept, None, None]
     # should now be scaling a fp type to an int type
     if check_range:
         scaling, intercept, scaled_mn, scaled_mx = scale_min_max(
-            mn, mx, out_type, allow_intercept, check_range, in_type)
+            mn, mx, out_type, allow_intercept, check_range, in_type, work_type)
         if (scaled_mn, scaled_mx) == (None, None):
             # Turn off prescale range checking - it's for infs
             mn, mx = None, None
         return [scaling, intercept, mn, mx, scaled_mn, scaled_mx]
     scaling, intercept  = scale_min_max(
-        mn, mx, out_type, allow_intercept, False, in_type)
+        mn, mx, out_type, allow_intercept, False, in_type, work_type)
     return [scaling, intercept, mn, mx]
 
 
 def scale_min_max(mn, mx, out_type, allow_intercept, check_range=False,
-                  in_type=None):
+                  in_type=None, work_type=None):
     ''' Return scaling and intercept min, max of data, given output type
 
     Returns ``scalefactor`` and ``intercept`` to best fit data with
@@ -808,6 +814,9 @@ def scale_min_max(mn, mx, out_type, allow_intercept, check_range=False,
     in_type : None or numpy type
         Dtype of input values.  If None, try and work it out from passed `mn`
         and `mx`
+    work_type : None or numpy type
+        Dtype of inter / scale working type.  If None, try and work out a
+        sensible default
 
     Returns
     -------
@@ -871,18 +880,20 @@ def scale_min_max(mn, mx, out_type, allow_intercept, check_range=False,
         else:
             my_types = np.sctypes['float']
         max_type = np.maximum_sctype(in_type)
-        if max_type == in_type:
-            work_type = in_type
-        else:
-            my_ind = my_types.index(in_type)
-            work_type = my_types[my_ind+1]
+        if work_type is None:
+            if max_type == in_type:
+                work_type = in_type
+            else:
+                my_ind = my_types.index(in_type)
+                work_type = my_types[my_ind+1]
     else: # Integer input type
         max_type = np.maximum_sctype(np.float)
         both_type = np.promote_types(in_type, out_type)
-        if both_type.itemsize >= 8:
-            work_type = np.float64
-        else:
-            work_type = np.float32
+        if work_type is None:
+            if both_type.itemsize >= 8:
+                work_type = np.float64
+            else:
+                work_type = np.float32
     out_type_min, out_type_max = info.min, info.max
     work_mn_mx = np.array(in_vals, max_type)
     work_mn, work_mx = work_mn_mx

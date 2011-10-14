@@ -922,7 +922,9 @@ def scale_min_max(mn, mx, out_type, allow_intercept, check_range=False,
         if check_range: # Will we overflow the out type range?
             # Try the scaling to see what happens to the values
             res = work_vals / scaling - intercept / scaling
-            if int(res[0]) < out_type_min or int(res[1]) > out_type_max:
+            if (not np.all(np.isfinite(res)) or
+                int(res[0]) < out_type_min or
+                int(res[1]) > out_type_max):
                 try:
                     ret_mn_mx[0] = floor_exact(out_type_min, work_type)
                     ret_mn_mx[1] = floor_exact(out_type_max, work_type)

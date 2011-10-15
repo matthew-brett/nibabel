@@ -64,7 +64,12 @@ def floor_exact(val, flt_type):
 
 
 def step_towards_zero(val):
-    """ Get next exact integer towards zero in this floating point type
+    """ Value `fv` giving the smallest ``d=val-fv`` for positive ``d``
+
+    Floating point values are exact values on a continuous scale of the real
+    numbers.  This routine analyzes the parts of the floating point
+    representation to return the next value exact value towards zero that the
+    floating point type of `val` can represent.
 
     Parameters
     ----------
@@ -74,7 +79,7 @@ def step_towards_zero(val):
 
     Returns
     -------
-    floor_val : object
+    fv : object
         value of same floating point type as `val`, that is the next excat
         integer in this type, towards zero.
 
@@ -207,5 +212,3 @@ def val_from_parts(type, g, s, e):
     if g:
         uint += maskat(fi.nmant + fi.nexp)
     return utype(uint).view(type)
-
-

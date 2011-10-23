@@ -151,17 +151,52 @@ def parts_from_val(val):
     """
     val = np.asarray(val)
     flt_type = val.dtype.type
+    fi = np.finfo(flt_type)
     try:
         utype = flts2uints[flt_type]
     except KeyError:
+        if (fi.nexp, fi.nmant) == (15, 63): # Intel 80 bit
+            return _parts_80(val)
         raise FloatingError("We don't support type %s" % flt_type)
-    fi = np.finfo(flt_type)
     uint = int(val.view(utype))
     s = uint & maskfor(fi.nmant)
     rest = uint >> fi.nmant
     u = rest & maskfor(fi.nexp)
     e = u + fi.minexp - 1
     g = bool(rest >> fi.nexp)
+    return g, s, e
+
+
+def _parts_80(val):
+    """ Return sign, significand, exponent from 80-bit fp value `val`
+
+    Parameters
+    ----------
+    val : object
+        value of float96 or float128 - Intel 80-bit extended precision
+
+    Returns
+    -------
+    g : bool
+        Sign.  True for negative, False for positive
+    s : significand
+        Significand as unsigned integer, and without explicit leading 1.
+    e : exponent
+        as signed integer
+    """
+    val = np.asarray(val)
+    flt_type = val.dtype.type
+    flt_size = val.dtype.itemsize
+    n_pad = flt_size - 10
+    fi = np.finfo(flt_type)
+    assert fi.nexp == 15
+    assert fi.nmant == 63
+    uints = val.view([('s','u8'),('gu', 'u2'),('padding','u1', n_pad)])
+    s = int(uints['s']) & maskfor(fi.nmant)
+    gu = int(uints['gu'])
+    u = gu & maskfor(fi.nexp)
+    e = u + fi.minexp - 1
+    g = bool(gu >> fi.nexp)
     return g, s, e
 
 
@@ -173,12 +208,12 @@ def maskat(bitn):
     return 2**bitn
 
 
-def val_from_parts(type, g, s, e):
-    """ Return value of `type` from sign `g`, significand `g`, exponent `e`
+def val_from_parts(flt_type, g, s, e):
+    """ Return value of `flt_type` from sign `g`, significand `g`, exponent `e`
 
     Parameters
     ----------
-    type : numpy type
+    flt_type : numpy type
         numpy float type.  Only IEEE types supported (np.float16, np.float32,
         np.float64)
     g : bool
@@ -193,7 +228,7 @@ def val_from_parts(type, g, s, e):
     Returns
     -------
     v : object
-        floating point value of type `type`
+        floating point value of type `flt_type`
 
     Examples
     --------
@@ -202,13 +237,52 @@ def val_from_parts(type, g, s, e):
     >>> val_from_parts(np.float32, True, 4194304, 1)
     -3.0
     """
+    fi = np.finfo(flt_type)
     try:
-        utype = flts2uints[type]
+        utype = flts2uints[flt_type]
     except KeyError:
-        raise FloatingError("We don't support type %s" % type)
-    fi = np.finfo(type)
+        if (fi.nexp, fi.nmant) == (15, 63): # Intel 80 bit
+            return _val_80(flt_type, g, s, e)
+        raise FloatingError("We don't support type %s" % flt_type)
     uint = e - fi.minexp + 1
     uint = (uint << fi.nmant) + s
     if g:
         uint += maskat(fi.nmant + fi.nexp)
-    return utype(uint).view(type)
+    return utype(uint).view(flt_type)
+
+
+def _val_80(flt_type, g, s, e):
+    """ Return value of `flt_type` from sign `g`, significand `g`, exponent `e`
+
+    For Intel 80 bit type
+
+    Parameters
+    ----------
+    flt_type : numpy type
+        numpy float type - either float96 or float128
+    g : bool
+        Sign.  True for negative, False for positive
+    s : significand
+        Significand as unsigned integer, and without leading 1.
+    e : exponent
+        as signed integer
+
+    Returns
+    -------
+    v : object
+        floating point value of type `flt_type`
+    """
+    fi = np.finfo(flt_type)
+    assert fi.nexp == 15
+    assert fi.nmant == 63
+    flt_size = np.dtype(flt_type).itemsize
+    n_pad = flt_size - 10
+    uints = np.zeros((1,), [('s','u8'),('gu', 'u2'),('padding','u1', n_pad)])
+    gu = e - fi.minexp + 1
+    if g:
+        gu += maskat(fi.nexp)
+    # Add back explicit leading 1
+    s += maskat(fi.nmant)
+    uints['s'] = s
+    uints['gu'] = gu
+    return uints.view(flt_type)

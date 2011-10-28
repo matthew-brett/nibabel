@@ -2,6 +2,8 @@
 
 Getting nearest exact integers in particular floating point types
 """
+from math import log
+
 import numpy as np
 
 flts2uints = {
@@ -57,10 +59,23 @@ def floor_exact(val, flt_type):
     >>> floor_exact(2**24+1, np.float32) == 2**24
     True
     """
-    tval = flt_type(val)
-    if abs(int(tval)) <= abs(int(val)):
-        return tval
-    return step_towards_zero(tval)
+    val = int(val)
+    flt_type = np.dtype(flt_type).type
+    sign = val > 0 and 1 or -1
+    aval = abs(val)
+    faval = flt_type(aval)
+    if int(faval) <= aval:
+        # Float casting has made the value go down or stay the same
+        return sign * faval
+    # Float casting made the value go up
+    fi = np.finfo(flt_type)
+    biggest_gap = 2**(int(log(aval, 2)) - fi.nmant)
+    assert biggest_gap > 1
+    faval -= flt_type(biggest_gap)
+    if biggest_gap > 2:
+        assert int(faval) == faval + flt_type(1)
+    return sign * faval
+    # return step_towards_zero(tval)
 
 
 def step_towards_zero(val):
@@ -68,7 +83,7 @@ def step_towards_zero(val):
 
     Floating point values are exact values on a continuous scale of the real
     numbers.  This routine analyzes the parts of the floating point
-    representation to return the next value exact value towards zero that the
+    representation to return the next exact value nearer to zero, that the
     floating point type of `val` can represent.
 
     Parameters

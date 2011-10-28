@@ -77,12 +77,18 @@ def test_floor_exact():
         # negatives
         assert_equal(step_towards_zero(t(-iv-2)), -iv)
         assert_equal(floor_exact(-iv-1, t), -iv)
-        # When we get to exponents nmant+2, gap between integers is 4
-        iv = 2**(nmant+2)
-        assert_equal(t(iv+4), iv+4)
-        assert_equal(step_towards_zero(t(iv+4)), iv)
-        assert_equal(floor_exact(iv+3, t), iv)
-        # negatives
-        assert_equal(step_towards_zero(t(-iv-4)), -iv)
-        assert_equal(floor_exact(-iv-3, t), -iv)
-
+        # The gap in representable numbers is 2 above 2**(nmant+1), 4 above
+        # 2**(nmant+2), and so on
+        for i in range(5):
+            iv = 2**(nmant+1+i)
+            gap = 2**(i+1)
+            assert_equal(t(iv+gap), iv+gap)
+            assert_equal(step_towards_zero(t(iv+gap)), iv)
+            for j in range(1,gap):
+                assert_equal(floor_exact(iv+j, t), iv)
+                assert_equal(floor_exact(iv+gap+j, t), iv+gap)
+            # negatives
+            assert_equal(step_towards_zero(t(-iv-gap)), -iv)
+            for j in range(1,gap):
+                assert_equal(floor_exact(-iv-j, t), -iv)
+                assert_equal(floor_exact(-iv-gap-j, t), -iv-gap)

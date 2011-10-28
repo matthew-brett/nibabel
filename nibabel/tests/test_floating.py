@@ -2,10 +2,8 @@
 """
 import numpy as np
 
-from ..floating import (parts_from_val, val_from_parts, step_towards_zero,
-                        floor_exact, maskfor, maskat)
+from ..floating import floor_exact, flt2nmant
 
-from nose import SkipTest
 from nose.tools import assert_equal
 
 IEEE_floats = [np.float32, np.float64]
@@ -14,81 +12,45 @@ try:
 except AttributeError: # float16 not present in np < 1.6
     pass
 
-def test_parts_vals():
+LD_INFO = np.finfo(np.longdouble)
+
+
+def test_flt2nmant():
     for t in IEEE_floats:
-        fi = np.finfo(t)
-        for i in range(fi.nmant+1):
-            v = 2**i
-            g, s, e = parts_from_val(t(v))
-            assert_equal((g, s, e), (False, 0, i))
-            assert_equal(val_from_parts(t, g, s, e), v)
-        top_1 = maskat(fi.nmant-1)
-        for v, eg, es, ee in ((3, False, top_1, 1),
-                              (-3, True, top_1, 1),
-                              (fi.max, False, maskfor(fi.nmant), fi.maxexp-1),
-                              (fi.min, True, maskfor(fi.nmant), fi.maxexp-1),
-                              (fi.tiny, False, 0, fi.minexp),
-                             ):
-            g, s, e = parts_from_val(t(v))
-            assert_equal((g, s, e), (eg, es, ee))
-            assert_equal(val_from_parts(t, g, s, e), v)
-
-
-def test_80s():
-    # Test 80 bit types.  We can't use big numbers because numpy does not like
-    # to compare float128 / float96s with big ints.  We can only go up to the
-    # size of a float64 type
-    t = np.longdouble
-    fi = np.finfo(t)
-    if (fi.nexp, fi.nmant) != (15, 63):
-        raise SkipTest('System does not have 80 bit long double')
-    for i in range(53): # This is the float64 size
-        v = 2**i
-        g, s, e = parts_from_val(t(v))
-        assert_equal((g, s, e), (False, 0, i))
-        assert_equal(val_from_parts(t, g, s, e), v)
-    top_1 = maskat(fi.nmant-1)
-    for v, eg, es, ee in ((3, False, top_1, 1),
-                            (-3, True, top_1, 1),
-                            (fi.max, False, maskfor(fi.nmant), fi.maxexp-1),
-                            (fi.min, True, maskfor(fi.nmant), fi.maxexp-1),
-                            (fi.tiny, False, 0, fi.minexp),
-                            ):
-        g, s, e = parts_from_val(t(v))
-        assert_equal((g, s, e), (eg, es, ee))
-        assert_equal(val_from_parts(t, g, s, e), v)
+        assert_equal(flt2nmant(t), np.finfo(t).nmant)
+    if (LD_INFO.nmant, LD_INFO.nexp) == (63, 15):
+        assert_equal(flt2nmant(np.longdouble), 63)
 
 
 def test_floor_exact():
-    for t in IEEE_floats + [float]:
-        fi = np.finfo(t)
-        nmant = fi.nmant
+    to_test = IEEE_floats + [float]
+    if (LD_INFO.nmant, LD_INFO.nexp) == (63, 15):
+        to_test.append(np.longdouble)
+    # When numbers go above int64 - I believe, numpy comparisons break down,
+    # so we have to cast to int before comparison
+    int_flex = lambda x, t : int(floor_exact(x, t))
+    for t in to_test:
+        nmant = flt2nmant(t)
         for i in range(nmant+1):
             iv = 2**i
             # up to 2**nmant should be exactly representable
-            assert_equal(step_towards_zero(t(iv)), iv-1)
-            assert_equal(floor_exact(iv, t), iv)
-            assert_equal(step_towards_zero(t(-iv)), -iv+1)
-            assert_equal(floor_exact(-iv, t), -iv)
+            assert_equal(int_flex(iv, t), iv)
+            assert_equal(int_flex(-iv, t), -iv)
         # Not so 2**(nmant+1)
         iv = 2**(nmant+1)
-        assert_equal(step_towards_zero(t(iv+2)), iv)
-        assert_equal(floor_exact(iv+1, t), iv)
+        assert_equal(int_flex(iv+1, t), iv)
         # negatives
-        assert_equal(step_towards_zero(t(-iv-2)), -iv)
-        assert_equal(floor_exact(-iv-1, t), -iv)
+        assert_equal(int_flex(-iv-1, t), -iv)
         # The gap in representable numbers is 2 above 2**(nmant+1), 4 above
         # 2**(nmant+2), and so on
         for i in range(5):
             iv = 2**(nmant+1+i)
             gap = 2**(i+1)
-            assert_equal(t(iv+gap), iv+gap)
-            assert_equal(step_towards_zero(t(iv+gap)), iv)
+            assert_equal(int(t(iv+gap)), iv+gap)
             for j in range(1,gap):
-                assert_equal(floor_exact(iv+j, t), iv)
-                assert_equal(floor_exact(iv+gap+j, t), iv+gap)
+                assert_equal(int_flex(iv+j, t), iv)
+                assert_equal(int_flex(iv+gap+j, t), iv+gap)
             # negatives
-            assert_equal(step_towards_zero(t(-iv-gap)), -iv)
             for j in range(1,gap):
-                assert_equal(floor_exact(-iv-j, t), -iv)
-                assert_equal(floor_exact(-iv-gap-j, t), -iv-gap)
+                assert_equal(int_flex(-iv-j, t), -iv)
+                assert_equal(int_flex(-iv-gap-j, t), -iv-gap)

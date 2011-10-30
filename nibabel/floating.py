@@ -20,6 +20,11 @@ _flt_nmant = {
     }
 
 
+class FloatingError(Exception):
+    pass
+
+
+
 def flt2nmant(flt_type):
     """ Number of significant bits in float type `flt_type`
 
@@ -45,11 +50,53 @@ def flt2nmant(flt_type):
     assert flt_type is np.longdouble
     if nmant == 63: # 80-bit intel type
         return 63 # No including explicit first digit
-    raise ValueError('Cannot be confident of nmant value for %s' % flt_type)
+    raise FloatingError('Cannot be confident of nmant value for %s' % flt_type)
 
 
-class FloatingError(Exception):
-    pass
+def as_int(x, check=True):
+    """ Return python integer representation of number. 
+
+    This is useful because the numpy int(val) mechanism is broken for values above
+    2**64 in floats
+
+    Parameters
+    ----------
+    x : object
+        Floating point value
+    check : {True, False}
+        If True, raise error for values that are not integers
+
+    Returns
+    -------
+    i : int
+        Python integer
+
+    Examples
+    --------
+    >>> as_int(2.0)
+    2
+    >>> as_int(-2.0)
+    -2
+    >>> as_int(2.1)
+    Traceback (most recent call last):
+        ...
+    ValueError: Not an integer: 2.1
+    >>> as_int(2.1, check=False)
+    2
+
+    Notes
+    -----
+    This might be fragile as it uses the repr of the number to cast to an int.
+    """
+    if int(x) == x:
+        return int(x)
+    res = repr(x)
+    pti = res.find('.')
+    if pti == -1:
+        return int(res)
+    if check and not int(res[pti+1:]) == 0:
+        raise FloatingError('Not an integer: %s' % x)
+    return int(res[:pti])
 
 
 def floor_exact(val, flt_type):
@@ -93,6 +140,9 @@ def floor_exact(val, flt_type):
     flt_type = np.dtype(flt_type).type
     sign = val > 0 and 1 or -1
     aval = abs(val)
+    if flt_type is np.longdouble and aval > 2**64:
+        raise FloatingError('Casting ints larger than 2**64 to longdouble '
+                            'is unrealiable')
     faval = flt_type(aval)
     if int(faval) <= aval:
         # Float casting has made the value go down or stay the same

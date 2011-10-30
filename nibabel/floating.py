@@ -11,7 +11,7 @@ try:
 except AttributeError: # float16 not present in np < 1.6
     _float16 = None
 
-# The number of significant digits in IEEE floating point formats, not including
+# The number of significand digits in IEEE floating point formats, not including
 # the implicit leading 0.  See http://en.wikipedia.org/wiki/IEEE_754-2008
 _flt_nmant = {
     _float16: 10,
@@ -24,9 +24,8 @@ class FloatingError(Exception):
     pass
 
 
-
 def flt2nmant(flt_type):
-    """ Number of significant bits in float type `flt_type`
+    """ Number of significand bits in float type `flt_type`
 
     Parameters
     ----------

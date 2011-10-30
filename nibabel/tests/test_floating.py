@@ -13,7 +13,6 @@ except AttributeError: # float16 not present in np < 1.6
     pass
 
 LD_INFO = np.finfo(np.longdouble)
-LD_IS_80 = (LD_INFO.nmant, LD_INFO.nexp) == (63, 15)
 
 def test_flt2nmant():
     for t in IEEE_floats:
@@ -32,15 +31,18 @@ def test_as_int():
     assert_equal(as_int(-2.1, False), -2)
     v = np.longdouble(2**64)
     assert_equal(as_int(v), 2**64)
-    if LD_IS_80:
-        assert_equal(as_int(v+2), 2**64+2)
+    # Have all long doubles got this precision?  We'll see I guess
+    assert_equal(as_int(v+2), 2**64+2)
 
 
 def test_floor_exact():
     to_test = IEEE_floats + [float]
-    if LD_IS_80:
-        # The PPC long doubles don't have a reliable nmant value. For the
-        # moment, only test for the Intel long double
+    try:
+        flt2nmant(np.longdouble)
+    except FloatingError:
+        # Significand bit count not reliable, don't test long double
+        pass
+    else:
         to_test.append(np.longdouble)
     # When numbers go above int64 - I believe, numpy comparisons break down,
     # so we have to cast to int before comparison

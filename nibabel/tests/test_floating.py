@@ -39,6 +39,8 @@ def test_as_int():
 def test_floor_exact():
     to_test = IEEE_floats + [float]
     if LD_IS_80:
+        # The PPC long doubles don't have a reliable nmant value. For the
+        # moment, only test for the Intel long double
         to_test.append(np.longdouble)
     # When numbers go above int64 - I believe, numpy comparisons break down,
     # so we have to cast to int before comparison
@@ -50,25 +52,23 @@ def test_floor_exact():
             # up to 2**nmant should be exactly representable
             assert_equal(int_flex(iv, t), iv)
             assert_equal(int_flex(-iv, t), -iv)
-        # We can't test large numbers for long double because we lose precision
-        # for ints > 2**64 when casting to longdouble
-        assert_raises(FloatingError, floor_exact, 2**64+1, np.longdouble)
-        if not t == np.longdouble:
-            # 2**(nmant+1) can't be exactly represented
-            iv = 2**(nmant+1)
-            assert_equal(int_flex(iv+1, t), iv)
+            assert_equal(int_flex(iv-1, t), iv-1)
+            assert_equal(int_flex(-iv+1, t), -iv+1)
+        # 2**(nmant+1) can't be exactly represented
+        iv = 2**(nmant+1)
+        assert_equal(int_flex(iv+1, t), iv)
+        # negatives
+        assert_equal(int_flex(-iv-1, t), -iv)
+        # The gap in representable numbers is 2 above 2**(nmant+1), 4 above
+        # 2**(nmant+2), and so on.
+        for i in range(5):
+            iv = 2**(nmant+1+i)
+            gap = 2**(i+1)
+            assert_equal(as_int(t(iv) + t(gap)), iv+gap)
+            for j in range(1,gap):
+                assert_equal(int_flex(iv+j, t), iv)
+                assert_equal(int_flex(iv+gap+j, t), iv+gap)
             # negatives
-            assert_equal(int_flex(-iv-1, t), -iv)
-            # The gap in representable numbers is 2 above 2**(nmant+1), 4 above
-            # 2**(nmant+2), and so on.
-            for i in range(5):
-                iv = 2**(nmant+1+i)
-                gap = 2**(i+1)
-                assert_equal(as_int(t(iv + gap)), iv+gap)
-                for j in range(1,gap):
-                    assert_equal(int_flex(iv+j, t), iv)
-                    assert_equal(int_flex(iv+gap+j, t), iv+gap)
-                # negatives
-                for j in range(1,gap):
-                    assert_equal(int_flex(-iv-j, t), -iv)
-                    assert_equal(int_flex(-iv-gap-j, t), -iv-gap)
+            for j in range(1,gap):
+                assert_equal(int_flex(-iv-j, t), -iv)
+                assert_equal(int_flex(-iv-gap-j, t), -iv-gap)

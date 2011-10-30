@@ -54,10 +54,10 @@ def flt2nmant(flt_type):
 
 
 def as_int(x, check=True):
-    """ Return python integer representation of number. 
+    """ Return python integer representation of number
 
-    This is useful because the numpy int(val) mechanism is broken for values above
-    2**64 in floats
+    This is useful because the numpy int(val) mechanism is broken for large
+    values in np.longdouble
 
     Parameters
     ----------
@@ -83,20 +83,18 @@ def as_int(x, check=True):
     ValueError: Not an integer: 2.1
     >>> as_int(2.1, check=False)
     2
-
-    Notes
-    -----
-    This might be fragile as it uses the repr of the number to cast to an int.
     """
-    if int(x) == x:
-        return int(x)
-    res = repr(x)
-    pti = res.find('.')
-    if pti == -1:
-        return int(res)
-    if check and not int(res[pti+1:]) == 0:
+    ix = int(x)
+    if ix == x:
+        return ix
+    fx = np.floor(x)
+    if check and fx != x:
         raise FloatingError('Not an integer: %s' % x)
-    return int(res[:pti])
+    f64 = np.float64(fx)
+    i64 = int(f64)
+    assert f64 == i64
+    res = fx - f64
+    return ix + int(res)
 
 
 def floor_exact(val, flt_type):
@@ -140,18 +138,24 @@ def floor_exact(val, flt_type):
     flt_type = np.dtype(flt_type).type
     sign = val > 0 and 1 or -1
     aval = abs(val)
-    if flt_type is np.longdouble and aval > 2**64:
-        raise FloatingError('Casting ints larger than 2**64 to longdouble '
-                            'is unrealiable')
-    faval = flt_type(aval)
-    if int(faval) <= aval:
-        # Float casting has made the value go down or stay the same
-        return sign * faval
+    if flt_type is np.longdouble:
+        # longdouble seems to go through casting to float64
+        f64 = floor_exact(aval, np.float64)
+        i64 = int(f64)
+        assert f64 == i64
+        res = aval - i64
+        faval = flt_type(i64) + flt_type(res)
+        if (faval - f64) <= res:
+            # Float casting has made the value go down or stay the same
+            return sign * faval
+    else: # Normal case
+        faval = flt_type(aval)
+        if int(faval) <= aval:
+            # Float casting has made the value go down or stay the same
+            return sign * faval
     # Float casting made the value go up
     nmant = flt2nmant(flt_type)
     biggest_gap = 2**(int(log(aval, 2)) - nmant)
     assert biggest_gap > 1
     faval -= flt_type(biggest_gap)
-    if biggest_gap > 2:
-        assert int(faval) == faval + flt_type(1)
     return sign * faval

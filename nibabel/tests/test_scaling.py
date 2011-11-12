@@ -15,7 +15,8 @@ from ..volumeutils import (calculate_scale, scale_min_max, finite_range)
 
 from numpy.testing import (assert_array_almost_equal, assert_array_equal)
 
-from nose.tools import assert_true, assert_equal, assert_raises
+from nose.tools import (assert_true, assert_equal, assert_raises,
+                        assert_not_equal)
 
 def test_scale_min_max():
     mx_dt = np.maximum_sctype(np.float)
@@ -84,3 +85,21 @@ def test_finite_range():
     assert_equal(finite_range(a), (0,3))
 
 
+def test_calculate_scale():
+    # Test for special cases in scale calculation
+    npa = np.array
+    # Case where sign flip handles scaling
+    res = calculate_scale(npa([-2, -1], dtype=np.int8), np.uint8, 1)
+    assert_equal(res, (-1.0, 0.0, None, None))
+    # Not having offset not a problem obviously
+    res = calculate_scale(npa([-2, -1], dtype=np.int8), np.uint8, 0)
+    assert_equal(res, (-1.0, 0.0, None, None))
+    # Case where offset handles scaling
+    res = calculate_scale(npa([-1, 1], dtype=np.int8), np.uint8, 1)
+    assert_equal(res, (1.0, -1.0, None, None))
+    # Can't work for no offset case
+    assert_raises(ValueError,
+                  calculate_scale, npa([-1, 1], dtype=np.int8), np.uint8, 0)
+    # Offset trick can't work when max is out of range
+    res = calculate_scale(npa([-1, 255], dtype=np.int16), np.uint8, 1)
+    assert_not_equal(res, (1.0, -1.0, None, None))

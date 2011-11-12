@@ -619,7 +619,7 @@ def calculate_scale(data, out_dtype, allow_intercept):
     ----------
     data : array
     out_dtype : dtype
-       output data type
+       output data type in some form understood by ``np.dtype``
     allow_intercept : bool
        If True allow non-zero intercept
 
@@ -641,28 +641,41 @@ def calculate_scale(data, out_dtype, allow_intercept):
     if np.can_cast(in_dtype, out_dtype):
         return default_ret
     in_type = in_dtype.type
-    out_type = out_dtype.type
+    out_type = np.dtype(out_dtype).type
     if out_type in floating_point_types:
         return default_ret
+    # We have an int or uint output type
     mn, mx = finite_range(data)
     if mn == np.inf: # No valid data
         return None, None, None, None
-    info = np.iinfo(out_type)
-    type_min = info.min
-    type_max = info.max
+    out_info = np.iinfo(out_type)
+    out_type_min = out_info.min
+    out_type_max = out_info.max
     if in_type in integer_types:
         # scaling a big int type into a smaller one
-        if mx <= type_max and mn >= type_min: # lucky; already in range
+        if mx <= out_type_max and mn >= out_type_min:
+            # lucky; already in range
             return default_ret
-        scaling, intercept = scale_min_max(mn, mx,
-                                           out_type,
-                                           allow_intercept)
+        # int in type, uint out type
+        if out_type_min == 0:
+            if mx < 0 and abs(mn) <= out_type_max:
+                # Sign flip will do it
+                return -1.0, 0.0, None, None
+            if mn < 0 and mx > 0:
+                if not allow_intercept:
+                    raise ValueError('Cannot scale negative and positive '
+                                     'numbers to uint without intercept')
+                # Maybe an intercept of the min will be enough
+                intercept = float(mn)
+                if (mx - intercept) <= out_type_max:
+                    return 1.0, intercept, None, None
+                # Oh well, we'll have to calculate scaling
+        # Also need scaling if going from big uint / int to smaller one
+        scaling, intercept = scale_min_max(mn, mx, out_type, allow_intercept)
         return scaling, intercept, None, None
     # should now be scaling a fp type to an int type
-    if not in_type in np.sctypes['float']:
-        raise TypeError('Unexpected input dtype %s' % in_dtype)
-    scaling, intercept = scale_min_max(mn, mx, out_type,
-                                        allow_intercept)
+    assert in_type in np.sctypes['float']
+    scaling, intercept = scale_min_max(mn, mx, out_type, allow_intercept)
     return scaling, intercept, mn, mx
 
 

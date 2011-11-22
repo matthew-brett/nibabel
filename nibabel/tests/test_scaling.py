@@ -11,7 +11,8 @@ from __future__ import with_statement
 
 import numpy as np
 
-from ..volumeutils import (calculate_scale, scale_min_max, finite_range)
+from ..volumeutils import (calculate_scale, scale_min_max, finite_range,
+                           int_scinter_ftype)
 
 from numpy.testing import (assert_array_almost_equal, assert_array_equal)
 
@@ -103,3 +104,11 @@ def test_calculate_scale():
     # Offset trick can't work when max is out of range
     res = calculate_scale(npa([-1, 255], dtype=np.int16), np.uint8, 1)
     assert_not_equal(res, (1.0, -1.0, None, None))
+
+
+def test_int_scinter():
+    # Finding float type needed for applying scale, offset to ints
+    assert_equal(int_scinter_ftype(np.int8, 1.0, 0.0), np.float32)
+    assert_equal(int_scinter_ftype(np.int8, -1.0, 0.0), np.float32)
+    assert_equal(int_scinter_ftype(np.int8, 1e38, 0.0), np.float64)
+    assert_equal(int_scinter_ftype(np.int8, -1e38, 0.0), np.float64)

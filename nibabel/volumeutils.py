@@ -9,6 +9,7 @@
 ''' Utility functions for analyze-like formats '''
 
 import sys
+import warnings
 import gzip
 import bz2
 
@@ -772,6 +773,50 @@ def scale_min_max(mn, mx, out_type, allow_intercept):
         else:
             scaling = mn / type_min
     return scaling, 0.0
+
+
+def int_scinter_ftype(ifmt, scale, inter, default=np.float32):
+    """ float type containing int type `ifmt` * `scale` + `inter`
+
+    Return float type that can represent the max and the min of the `ifmt` type
+    after multiplication with `scale` and addition of `inter`.
+
+    Parameters
+    ----------
+    ifmt : object
+        numpy integer type (e.g. np.int32)
+    scale : float
+        scale factor
+    inter : float
+        intercept
+    default_out : object, optional
+        numpy floating point type, default is ``np.float32``
+
+    Returns
+    -------
+    ftype : object
+        numpy floating point type
+
+    Examples
+    --------
+    >>> int_scinter_ftype(np.int8, 1.0, 0.0) == np.float32
+    True
+    >>> int_scinter_ftype(np.int8, 1e38, 0.0) == np.float64
+    True
+    """
+    floats = np.sctypes['float']
+    def_ind = floats.index(default)
+    ii = np.iinfo(ifmt)
+    tst_arr = np.array([ii.min, ii.max], dtype=ifmt)
+    warnings.filterwarnings('ignore', '.*overflow.*', RuntimeWarning)
+    try:
+        for ftype in floats[def_ind:]:
+            tst_trans = tst_arr * ftype(scale) + ftype(inter)
+            if np.all(np.isfinite(tst_trans)):
+                return ftype
+    finally:
+        warnings.filters.pop(0)
+    raise ValueError('Overflow using highest floating point type')
 
 
 def finite_range(arr):

@@ -17,6 +17,8 @@ import numpy as np
 
 from .py3k import isfileobj, ZEROB
 
+from .casting import float_to_int
+
 sys_is_le = sys.byteorder == 'little'
 native_code = sys_is_le and '<' or '>'
 swapped_code = sys_is_le and '>' or '<'
@@ -572,6 +574,20 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
         out_dtype = in_dtype
     else:
         out_dtype = np.dtype(out_dtype)
+    if not order in 'FC':
+        raise ValueError('Order should be one of F or C')
+    float_in = in_dtype.kind in 'fc'
+    int_out = out_dtype.kind in 'iu'
+    float2int = float_in and int_out
+    needs_clip = not (mn, mx) == (None, None)
+    if needs_clip:
+        if float_in:
+            mn = -np.inf if mn is None else mn
+            mx = np.inf if mx is None else mx
+        else:
+            int_info = np.iinfo(in_dtype)
+            mn = int_info.min if mn is None else mn
+            mx = int_info.max if mx is None else mx
     try:
         fileobj.seek(offset)
     except IOError:
@@ -581,32 +597,26 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
     if divslope is None: # No valid data
         fileobj.write(ZEROB * (data.size*out_dtype.itemsize))
         return
-    nan2zero = (nan2zero and
-                data.dtype in floating_point_types and
-                out_dtype not in floating_point_types)
-    needs_copy = nan2zero or mx or mn or intercept or divslope != 1.0
+    out_type = out_dtype.type
+    if order == 'F':
+        data = data.T
     if data.ndim < 2: # a little hack to allow 1D arrays in loop below
         data = [data]
-    elif order == 'F':
-        data = data.T
-    elif order != 'C':
-        raise ValueError('Order should be one of F or C')
     for dslice in data: # cycle over largest dimension to save memory
-        if needs_copy:
-            dslice = dslice.copy()
-        if nan2zero:
-            dslice[np.isnan(dslice)] = 0
-        if mx:
-            dslice[dslice > mx] = mx
-        if mn:
-            dslice[dslice < mn] = mn
-        if intercept:
-            dslice -= intercept
+        if needs_clip:
+            dslice = np.clip(dslice, mn, mx)
+        # From here the dtype can change
+        if intercept != 0.0:
+            dslice = dslice - intercept
         if divslope != 1.0:
-            dslice /= divslope
-        if in_dtype == out_dtype:
+            dslice = dslice / divslope
+        if float2int:
+            dslice = float_to_int(dslice, out_type, nan2zero=nan2zero)
+        # Dtype comparisons can give false negatives, but then, we'll just have
+        # to go the long way round and use astype below
+        if dslice.dtype == out_dtype:
             fileobj.write(dslice.tostring())
-        elif in_dtype == out_dtype.newbyteorder('S'): # just byte swapped
+        elif dslice.dtype == out_dtype.newbyteorder('S'): # just byte swapped
             out_arr = dslice.byteswap()
             fileobj.write(out_arr.tostring())
         else:

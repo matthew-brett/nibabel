@@ -28,9 +28,11 @@ def float_to_int(arr, int_type, nan2zero=True, infmax=False):
         Array of floating point type
     int_type : object
         Numpy integer type
-    nan2zero : {True, False}
+    nan2zero : {True, False, None}
         Whether to convert NaN value to zero.  Default is True.  If False, and
-        NaNs are present, raise CastingError
+        NaNs are present, raise CastingError. If None, do not check for NaN
+        values and pass through directly to the ``astype`` casting mechanism.
+        In this last case, the resulting value is undefined.
     infmax : {False, True}
         If True, set np.inf values in `arr` to be `int_type` integer maximum
         value, -np.inf as `int_type` integer minimum.  If False, set +/- infs to
@@ -73,12 +75,15 @@ def float_to_int(arr, int_type, nan2zero=True, infmax=False):
     shape = arr.shape
     arr = np.atleast_1d(arr)
     mn, mx = _cached_int_clippers(flt_type, int_type)
-    nans = np.isnan(arr)
-    have_nans = np.any(nans)
-    if not nan2zero and have_nans:
-        raise CastingError('NaNs in array, nan2zero not True')
+    if nan2zero is None:
+        seen_nans = False
+    else:
+        nans = np.isnan(arr)
+        seen_nans = np.any(nans)
+        if nan2zero == False and seen_nans:
+            raise CastingError('NaNs in array, nan2zero is False')
     iarr = np.clip(np.rint(arr), mn, mx).astype(int_type)
-    if have_nans:
+    if seen_nans:
         iarr[nans] = 0
     if not infmax:
         return iarr.reshape(shape)

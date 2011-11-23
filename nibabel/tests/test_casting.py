@@ -3,7 +3,8 @@
 
 import numpy as np
 
-from ..casting import (float_to_int, int_clippers, CastingError, int_to_float)
+from ..casting import (float_to_int, int_clippers, CastingError, int_to_float,
+                       as_int)
 
 from numpy.testing import (assert_array_almost_equal, assert_array_equal)
 
@@ -81,23 +82,27 @@ def test_casting():
             farr = farr_orig.copy()
             mn, mx = int_clippers(ft, it)
             iarr = float_to_int(farr, it)
-            exp_arr = np.array([mn, mx, mn, mx, 0, 0, 11])
+            # Dammit - for long doubles we need to jump through some hoops not
+            # to round to numbers outside the range
+            if ft is np.longdouble:
+                mn = as_int(mn)
+                mx = as_int(mx)
+            exp_arr = np.array([mn, mx, mn, mx, 0, 0, 11], dtype=it)
             assert_array_equal(iarr, exp_arr)
+            # Now test infmax version
             iarr = float_to_int(farr, it, infmax=True)
+            im_exp = np.array([mn, mx, ii.min, ii.max, 0, 0, 11], dtype=it)
             # Float16 can overflow to infs
             if farr[0] == -np.inf:
-                exp_arr[0] = ii.min
+                im_exp[0] = ii.min
             if farr[1] == np.inf:
-                exp_arr[1] = ii.max
-            exp_arr[2] = ii.min
-            if exp_arr.dtype.type is np.longdouble:
-                # longdouble seems to go through float64 on assignment; if
-                # ii.max is above float64 integer resolution we have go through
-                # float64 to split up the number and get full precision
-                f64 = np.float64(ii.max)
-                exp_arr[3] = np.longdouble(f64) + np.float64(ii.max - int(f64))
-            else:
-                exp_arr[3] = ii.max
+                im_exp[1] = ii.max
+            assert_array_equal(iarr, im_exp)
+            # NaNs, with nan2zero False, gives error
+            assert_raises(CastingError, float_to_int, farr, it, False)
+            # We can pass through NaNs if we really want
+            exp_arr[arr.index(np.nan)] = ft(np.nan).astype(it)
+            iarr = float_to_int(farr, it, nan2zero=None)
             assert_array_equal(iarr, exp_arr)
             # Confirm input array is not modified
             nans = np.isnan(farr)

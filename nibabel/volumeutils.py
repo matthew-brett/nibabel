@@ -541,11 +541,11 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
        this value are set to this value. Default is None (no threshold)
     order : {'F', 'C'}, optional
        memory order to write array.  Default is 'F'
-    nan2zero : {True, False}, optional
+    nan2zero : {True, False, None}, optional
        Whether to set NaN values to 0 when writing integer output.
-       Defaults to True.  If False, NaNs will be represented as numpy
-       does when casting, and this can be odd (often the lowest
-       available integer value)
+       Defaults to True.  If False, and there are NaNs in the input, you will
+       get an exception. If None, NaNs will be represented as numpy does when
+       casting, and this can be odd (often the lowest available integer value)
 
     Examples
     --------
@@ -578,7 +578,9 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
         raise ValueError('Order should be one of F or C')
     float_in = in_dtype.kind in 'fc'
     int_out = out_dtype.kind in 'iu'
-    float2int = float_in and int_out
+    # Do we need to use rounding?
+    float_sometime = float_in
+    # Work out values to clip at
     needs_clip = not (mn, mx) == (None, None)
     if needs_clip:
         if float_in:
@@ -588,6 +590,14 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
             int_info = np.iinfo(in_dtype)
             mn = int_info.min if mn is None else mn
             mx = int_info.max if mx is None else mx
+            # If mx, mn are floats, clipping will make floats
+            assay = np.clip(np.zeros(1, dtype=in_dtype), mn, mx)
+            float_sometime = assay.dtype.kind in 'fc'
+    # Do we need to round?
+    float_sometime = float_sometime and (divslope != 1.0 or intercept != 0.0)
+    needs_round = float_sometime and int_out
+    if not float_in:
+        nan2zero = None # We have no nans, no need to check
     try:
         fileobj.seek(offset)
     except IOError:
@@ -610,7 +620,7 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
             dslice = dslice - intercept
         if divslope != 1.0:
             dslice = dslice / divslope
-        if float2int:
+        if needs_round:
             dslice = float_to_int(dslice, out_type, nan2zero=nan2zero)
         # Dtype comparisons can give false negatives, but then, we'll just have
         # to go the long way round and use astype below

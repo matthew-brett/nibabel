@@ -162,13 +162,14 @@ def test_a2f_nan2zero():
     array_to_file(arr, str_io, nan2zero=True)
     data_back = array_from_file(arr.shape, np.float32, str_io)
     assert_array_equal(np.isnan(data_back), [True, False])
-    # Integer output without nan2zero should raise error
-    a2f_no_n2z = partial(array_to_file, nan2zero=False)
-    assert_raises(CastingError, a2f_no_n2z, arr, str_io, np.int32)
-    # Integer output with gives zero
+    # Integer output with nan2zero gives zero
     array_to_file(arr, str_io, np.int32, nan2zero=True)
     data_back = array_from_file(arr.shape, np.int32, str_io)
     assert_array_equal(data_back, [0, 99])
+    # Integer output with nan2zero=False gives whatever astype gives
+    array_to_file(arr, str_io, np.int32, nan2zero=False)
+    data_back = array_from_file(arr.shape, np.int32, str_io)
+    assert_array_equal(data_back, [np.array(np.nan).astype(np.int32), 99])
 
 
 def type_min_max(dtype_type):

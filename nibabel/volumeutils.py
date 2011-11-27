@@ -541,10 +541,9 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
        this value are set to this value. Default is None (no threshold)
     order : {'F', 'C'}, optional
        memory order to write array.  Default is 'F'
-    nan2zero : {True, False, None}, optional
+    nan2zero : {True, False}, optional
        Whether to set NaN values to 0 when writing integer output.
-       Defaults to True.  If False, and there are NaNs in the input, you will
-       get an exception. If None, NaNs will be represented as numpy does when
+       Defaults to True.  If False, NaNs will be represented as numpy does when
        casting, and this can be odd (often the lowest available integer value)
 
     Examples
@@ -594,10 +593,10 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
             assay = np.clip(np.zeros(1, dtype=in_dtype), mn, mx)
             float_sometime = assay.dtype.kind in 'fc'
     # Do we need to round?
-    float_sometime = float_sometime and (divslope != 1.0 or intercept != 0.0)
+    float_sometime = float_sometime or divslope != 1.0 or intercept != 0.0
     needs_round = float_sometime and int_out
-    if not float_in:
-        nan2zero = None # We have no nans, no need to check
+    if not float_in or nan2zero == False:
+        nan2zero = None # Do not check for nans
     try:
         fileobj.seek(offset)
     except IOError:

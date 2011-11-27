@@ -568,69 +568,25 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
     True
     '''
     data = np.asarray(data)
-    in_dtype = data.dtype
-    if out_dtype is None:
-        out_dtype = in_dtype
-    else:
-        out_dtype = np.dtype(out_dtype)
-    if not order in 'FC':
-        raise ValueError('Order should be one of F or C')
-    float_in = in_dtype.kind in 'fc'
-    int_out = out_dtype.kind in 'iu'
-    # Do we need to use rounding?
-    float_sometime = float_in
-    # Work out values to clip at
-    needs_clip = not (mn, mx) == (None, None)
-    if needs_clip:
-        if float_in:
-            mn = -np.inf if mn is None else mn
-            mx = np.inf if mx is None else mx
-        else:
-            int_info = np.iinfo(in_dtype)
-            mn = int_info.min if mn is None else mn
-            mx = int_info.max if mx is None else mx
-            # If mx, mn are floats, clipping will make floats
-            assay = np.clip(np.zeros(1, dtype=in_dtype), mn, mx)
-            float_sometime = assay.dtype.kind in 'fc'
-    # Do we need to round?
-    float_sometime = float_sometime or divslope != 1.0 or intercept != 0.0
-    needs_round = float_sometime and int_out
-    if not float_in or nan2zero == False:
-        nan2zero = None # Do not check for nans
+    if not mx is None:
+        data[data > mx] = mx
+    if not mn is None:
+        data[data < mn] = mn
+    from .arraywriters import ScaleInterArrayWriter
+    writer = ScaleInterArrayWriter(data, out_dtype, calc_scale=False)
+    writer.inter = intercept if not intercept is None else 0.0
+    writer.scale = divslope if not divslope is None else 1.0
+    seek_tell(fileobj, offset)
+    writer.to_fileobj(fileobj, order=order, nan2zero=nan2zero)
+
+
+def seek_tell(fileobj, offset):
     try:
         fileobj.seek(offset)
     except IOError:
         msg = sys.exc_info()[1] # python 2 / 3 compatibility
         if fileobj.tell() != offset:
             raise IOError(msg)
-    if divslope is None: # No valid data
-        fileobj.write(ZEROB * (data.size*out_dtype.itemsize))
-        return
-    out_type = out_dtype.type
-    if order == 'F':
-        data = data.T
-    if data.ndim < 2: # a little hack to allow 1D arrays in loop below
-        data = [data]
-    for dslice in data: # cycle over largest dimension to save memory
-        if needs_clip:
-            dslice = np.clip(dslice, mn, mx)
-        # From here the dtype can change
-        if intercept != 0.0:
-            dslice = dslice - intercept
-        if divslope != 1.0:
-            dslice = dslice / divslope
-        if needs_round:
-            dslice = float_to_int(dslice, out_type, nan2zero=nan2zero)
-        # Dtype comparisons can give false negatives, but then, we'll just have
-        # to go the long way round and use astype below
-        if dslice.dtype == out_dtype:
-            fileobj.write(dslice.tostring())
-        elif dslice.dtype == out_dtype.newbyteorder('S'): # just byte swapped
-            out_arr = dslice.byteswap()
-            fileobj.write(out_arr.tostring())
-        else:
-            fileobj.write(dslice.astype(out_dtype).tostring())
-
 
 def calculate_scale(data, out_dtype, allow_intercept):
     ''' Calculate scaling and optional intercept for data

@@ -9,12 +9,11 @@
 ''' Test for scaling / rounding in volumeutils module '''
 from __future__ import with_statement
 
-from functools import partial
+import sys
 
 import numpy as np
 
 from ..py3k import BytesIO
-from ..casting import CastingError
 from ..volumeutils import (calculate_scale, scale_min_max, finite_range,
                            int_scinter_ftype, array_to_file, array_from_file)
 
@@ -22,6 +21,10 @@ from numpy.testing import (assert_array_almost_equal, assert_array_equal)
 
 from nose.tools import (assert_true, assert_equal, assert_raises,
                         assert_not_equal)
+
+
+# Debug print statements
+DEBUG = True
 
 def test_scale_min_max():
     mx_dt = np.maximum_sctype(np.float)
@@ -183,6 +186,15 @@ def type_min_max(dtype_type):
     return info.min, info.max
 
 
+def promote_scinter(out_type, scale, inter):
+    # The datatype may need promoting for large values of scale, inter
+    dt = np.dtype(out_type)
+    if not dt.kind in 'iu':
+        return scale, inter
+    ft = int_scinter_ftype(out_type, scale, inter)
+    return ft(scale), ft(inter)
+
+
 def test_array_file_scales():
     # Test scaling works for max, min when going from larger to smaller type,
     # and from float to integer.
@@ -203,6 +215,7 @@ def test_array_file_scales():
         array_to_file(arr, bio, out_type, 0, inter, slope, mn, mx)
         bio.seek(0)
         arr2 = array_from_file(arr.shape, out_dtype, bio)
+        slope, inter = promote_scinter(out_type, slope, inter)
         arr3 = arr2 * slope + inter
         # Max rounding error for integer type
         max_miss = slope / 2.
@@ -242,21 +255,27 @@ def check_int_a2f(in_type, out_type):
         data[0] = this_min + 0j
         data[1] = this_max + 0j
     str_io = BytesIO()
-    scale, inter, mn, mx = calculate_scale(data, out_type, True)
-    if scale == np.inf or inter == np.inf:
+    try:
+        scale, inter, mn, mx = calculate_scale(data, out_type, True)
+    except ValueError:
+        if DEBUG:
+            print in_type, out_type, sys.exc_info()[1]
         return
     array_to_file(data, str_io, out_type, 0, inter, scale, mn, mx)
     data_back = array_from_file(data.shape, out_type, str_io)
+    scale, inter = promote_scinter(out_type, scale, inter)
     if not scale is None and scale !=1.0:
         data_back = data_back * scale
     if not inter is None and inter !=0:
         data_back = data_back + inter
-    assert_true(np.allclose(big_floater(data), big_floater(data_back)))
+    assert_true(np.allclose(big_floater(data), big_floater(data_back),
+                            rtol=1e-3))
     # Try with analyze-size scale and inter
     scale32 = np.float32(scale)
     inter32 = np.float32(inter)
     if scale32 == np.inf or inter32 == np.inf:
         return
+    scale32, inter32 = promote_scinter(out_type, scale32, inter32)
     data_back = array_from_file(data.shape, out_type, str_io)
     if not scale32 is None and scale32 !=1.0:
         data_back = data_back * scale32
@@ -265,4 +284,5 @@ def check_int_a2f(in_type, out_type):
     # Clip at extremes to remove inf
     out_min, out_max = type_min_max(in_type)
     assert_true(np.allclose(big_floater(data),
-                            big_floater(np.clip(data_back, out_min, out_max))))
+                            big_floater(np.clip(data_back, out_min, out_max)),
+                            1e-3))

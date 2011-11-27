@@ -563,12 +563,16 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
     >>> sio.getvalue() == data.tostring('C')
     True
     '''
-    data = np.asarray(data)
+    # Crude min / max thresholding
+    copy = not (mn, mx) == (None, None)
+    data = np.array(data, copy=copy)
     if not mx is None:
         data[data > mx] = mx
     if not mn is None:
         data[data < mn] = mn
     from .arraywriters import ScaleInterArrayWriter
+    if not np.any(np.isfinite(data)):
+        data = np.zeros_like(data)
     writer = ScaleInterArrayWriter(data, out_dtype, calc_scale=False)
     writer.inter = intercept if not intercept is None else 0.0
     writer.scale = divslope if not divslope is None else 1.0
@@ -577,12 +581,22 @@ def array_to_file(data, fileobj, out_dtype=None, offset=0,
 
 
 def seek_tell(fileobj, offset):
+    """ Seek in `fileobj` or check we're in the right place already
+
+    Parameters
+    ----------
+    fileobj : file-like
+        object implementing ``seek`` and (if seek raises an IOError) ``tell``
+    offset : int
+        position in file to which to seek
+    """
     try:
         fileobj.seek(offset)
     except IOError:
         msg = sys.exc_info()[1] # python 2 / 3 compatibility
         if fileobj.tell() != offset:
             raise IOError(msg)
+
 
 def calculate_scale(data, out_dtype, allow_intercept):
     ''' Calculate scaling and optional intercept for data
@@ -608,47 +622,28 @@ def calculate_scale(data, out_dtype, allow_intercept):
        minimum of finite value in data, or None if this will not
        be used to threshold data
     '''
-    default_ret = (1.0, 0.0, None, None)
+    # Code here is a compatibility shell around arraywriters refactor
     in_dtype = data.dtype
+    out_dtype = np.dtype(out_dtype)
     if np.can_cast(in_dtype, out_dtype):
-        return default_ret
-    in_type = in_dtype.type
-    out_type = np.dtype(out_dtype).type
-    if out_type in floating_point_types:
-        return default_ret
-    # We have an int or uint output type
-    mn, mx = finite_range(data)
-    if mn == np.inf: # No valid data
-        return None, None, None, None
-    out_info = np.iinfo(out_type)
-    out_type_min = out_info.min
-    out_type_max = out_info.max
-    if in_type in integer_types:
-        # scaling a big int type into a smaller one
-        if mx <= out_type_max and mn >= out_type_min:
-            # lucky; already in range
-            return default_ret
-        # int in type, uint out type
-        if out_type_min == 0:
-            if mx < 0 and abs(mn) <= out_type_max:
-                # Sign flip will do it
-                return -1.0, 0.0, None, None
-            if mn < 0 and mx > 0:
-                if not allow_intercept:
-                    raise ValueError('Cannot scale negative and positive '
-                                     'numbers to uint without intercept')
-                # Maybe an intercept of the min will be enough
-                intercept = float(mn)
-                if (mx - intercept) <= out_type_max:
-                    return 1.0, intercept, None, None
-                # Oh well, we'll have to calculate scaling
-        # Also need scaling if going from big uint / int to smaller one
-        scaling, intercept = scale_min_max(mn, mx, out_type, allow_intercept)
-        return scaling, intercept, None, None
-    # should now be scaling a fp type to an int type
-    assert in_type in np.sctypes['float']
-    scaling, intercept = scale_min_max(mn, mx, out_type, allow_intercept)
-    return scaling, intercept, mn, mx
+        return 1.0, 0.0, None, None
+    from .arraywriters import (ScaleInterArrayWriter, ScaleArrayWriter,
+                               WriterError)
+    klass = ScaleInterArrayWriter if allow_intercept else ScaleArrayWriter
+    writer = klass(data, out_dtype, calc_scale=False)
+    try:
+        writer.calc_scale()
+    except WriterError:
+        msg = sys.exc_info()[1] # python 2 / 3 compatibility
+        raise ValueError(msg)
+    if out_dtype.kind in 'fc':
+        return (1.0, 0.0, None, None)
+    mn, mx = writer.finite_range()
+    if (mn, mx) == (np.inf, -np.inf): # No valid data
+        return (None, None, None, None)
+    if not in_dtype.kind in 'fc':
+        mn, mx = (None, None)
+    return writer.scale, writer.inter, mn, mx
 
 
 def scale_min_max(mn, mx, out_type, allow_intercept):
@@ -708,7 +703,6 @@ def scale_min_max(mn, mx, out_type, allow_intercept):
     The large integers lead to python long types as max / min for type.
     To contain the rounding error, we need to use the maximum numpy
     float types when casting to float.
-
     '''
     if mn > mx:
         raise ValueError('min value > max value')

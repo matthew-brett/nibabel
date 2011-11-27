@@ -25,7 +25,7 @@ int, or between larger ints and smaller.
 
 import numpy as np
 
-from .casting import shared_range
+from .casting import shared_range, int_to_float
 
 
 class WriterError(Exception):
@@ -47,20 +47,39 @@ class ScaleInterArrayWriter(object):
             dtype with which `array` will be written.  For this class,
             `out_dtype`` needs to be the same as the dtype of the input `array`
             or a swapped version of the same.
+        calc_scale : {True, False}
+            Whether to calculate scaling for writing `array` on initialization.
+            If False, then you can calculate this scaling with
+            ``obj.calc_scale()`` - see examples
 
         Examples
         --------
-        >>> aw = ArrayWriter(np.arange(10))
+        >>> arr = np.array([0, 255], np.uint8)
+        >>> aw = ScaleInterArrayWriter(arr)
+        >>> aw.scale, aw.inter
+        (1.0, 0.0)
+        >>> aw = ScaleInterArrayWriter(arr, np.int8)
+        >>> (aw.scale, aw.inter) == (1.0, 128)
+        True
         """
         self._array = np.asanyarray(array)
         arr_dtype = self._array.dtype
-        self._scale = 1.0
-        self._inter = 0.0
+        # Use raw set to bypass properties.  Not needed for this class but for
+        # subclasses overriding properties but wanting to keep init
+        self._scale = self.scale_inter_type(1.0)
+        self._inter = self.scale_inter_type(0.0)
         if out_dtype is None:
             out_dtype = arr_dtype
         else:
             out_dtype = np.dtype(out_dtype)
         self._out_dtype = out_dtype
+        if calc_scale:
+            self.calc_scale()
+
+    def calc_scale(self):
+        """ Calculate scaling (if any) for contained array """
+        arr_dtype = self._array.dtype
+        out_dtype = self._out_dtype
         if np.can_cast(arr_dtype, out_dtype):
             return
         if 'V' in (arr_dtype.kind, out_dtype.kind):
@@ -70,8 +89,6 @@ class ScaleInterArrayWriter(object):
         if arr_dtype.kind == 'c':
             raise WriterError('Cannot cast complex types to non-complex')
         if out_dtype.kind == 'f':
-            return
-        if not calc_scale:
             return
         # Try to scale, raise error if we fail
         self._scale_fi2i()
@@ -91,13 +108,13 @@ class ScaleInterArrayWriter(object):
     def _get_scale(self):
         return self._scale
     def _set_scale(self, val):
-        self._scale = self.scale_inter_type(val)
+        self._scale = np.squeeze(self.scale_inter_type(val))
     scale = property(_get_scale, _set_scale, None, 'get/set scale')
 
     def _get_inter(self):
         return self._inter
     def _set_inter(self, val):
-        self._inter = self.scale_inter_type(val)
+        self._inter = np.squeeze(self.scale_inter_type(val))
     inter = property(_get_inter, _set_inter, None, 'get/set inter')
 
     def _scale_fi2i(self):
@@ -117,17 +134,30 @@ class ScaleInterArrayWriter(object):
             self._range_scale()
             return
         # (u)int to (u)int
-        out_max, out_min = np.iinfo(out_dtype)
+        info = np.iinfo(out_dtype)
+        out_max, out_min = info.max, info.min
         if mx <= out_max and mn >= out_min: # already in range
             return
         # From here we will be using scaling, so we need to take into account
         # the precision of the type to which we will scale
         shared_min, shared_max = shared_range(self.scale_inter_type, out_dtype)
-        if out_min == 0 and mx < 0 and abs(mn) <= shared_max: # sign flip?
-            # -1.0 * arr will be in scale_inter_type precision
-            self.scale = -1.0
-            return
+        if out_dtype.kind == 'u':
+            if mx < 0 and abs(mn) <= shared_max: # sign flip enough?
+                # -1.0 * arr will be in scale_inter_type precision
+                self.scale = -1.0
+                return
         # (u)int to (u)int scaling
+        self._ui2i()
+
+    def _ui2i(self):
+        """ (u)int to (u)int scaling """
+        if self._out_dtype.kind == 'u':
+            shared_min, shared_max = shared_range(self.scale_inter_type,
+                                                  self._out_dtype)
+            mn, mx = self.finite_range()
+            if (mx - mn) <= shared_max: # offset enough?
+                self.inter = mn
+                return
         self._range_scale()
 
     def _range_scale(self):
@@ -136,20 +166,22 @@ class ScaleInterArrayWriter(object):
         if mx == mn: # Only one number in array
             self.inter = mn
             return
-        if mn.dtype.kind == 'f':
-            # We need to promote to maximum type to allow for very high data ranges
-            # that may not fit in their native types
-            mn2mx = np.diff(np.array([mn, mx], dtype=np.longdouble))
-            if not np.isfinite(mn2mx):
-                raise WriterError('Data range too large for scaling')
-        else: # python's long integers allow us to avoid overflow
-            mn2mx = int(mx) - int(mn)
         # We need to allow for precision of the type to which we will scale
         # These will be floats of type scale_inter_type
         shared_min, shared_max = shared_range(self.scale_inter_type,
                                               self._out_dtype)
         scaled_mn2mx = np.diff(np.array([shared_min, shared_max],
                                         dtype=np.longdouble))
+        # Straight mx-mn can overflow.
+        if mn.dtype.kind == 'f': # Already floats
+            # float64 and below cast correctly to longdouble.  Longdouble needs
+            # no casting
+            mn2mx = np.diff(np.array([mn, mx], dtype=np.longdouble))
+        else: # max possible (u)int range is 2**64-1 (int64, uint64)
+            # int_to_float covers this range.  On windows longdouble is the same
+            # as double so mn2mx will be 2**64 - thus overestimating scale
+            # slightly.  Casting to int here is probably not necessary
+            mn2mx = int_to_float(int(mx) - int(mn), np.longdouble)
         scale = mn2mx / scaled_mn2mx
         self.inter = mn - shared_min * scale
         self.scale = scale
@@ -181,9 +213,6 @@ class ScaleInterArrayWriter(object):
         data = self._array
         out_dtype = self._out_dtype
         need_int = out_dtype.kind in 'iu'
-        if need_int:
-            shared_min, shared_max = shared_range(self.scale_inter_type,
-                                                  out_dtype)
         nan2zero = nan2zero and data.dtype.kind == 'f'
         scale, inter = self._scale, self._inter
         if not order in 'FC':
@@ -197,7 +226,8 @@ class ScaleInterArrayWriter(object):
             if scale != 1.0:
                 dslice = dslice / scale
             if need_int and dslice.dtype.kind == 'f':
-                dslice = np.clip(np.rint(dslice), shared_min, shared_max)
+                both_mn, both_mx = shared_range(dslice.dtype, out_dtype)
+                dslice = np.clip(np.rint(dslice), both_mn, both_mx)
                 if nan2zero:
                     dslice[np.isnan(dslice)] = 0
                 dslice = dslice.astype(out_dtype)
@@ -211,6 +241,10 @@ class ScaleArrayWriter(ScaleInterArrayWriter):
     def inter(self):
         """ Intercept read only for slope writer """
         return self._inter
+
+    def _ui2i(self):
+        """ (u)int to (u)int scaling """
+        self._range_scale()
 
     def _range_scale(self):
         """ Calculate scaling based on data range and output type """

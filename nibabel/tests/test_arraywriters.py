@@ -115,3 +115,7 @@ def test_to_float():
                 out_max = np.finfo(out_type).max
                 assert_true(np.all(arr_back[arr > out_max] == np.inf))
                 assert_true(np.all(arr_back[arr < out_min] == -np.inf))
+
+
+def test_float_int():
+    # Conversion between float and int

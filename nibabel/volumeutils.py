@@ -15,9 +15,7 @@ import bz2
 
 import numpy as np
 
-from .py3k import isfileobj, ZEROB
-
-from .casting import float_to_int
+from .py3k import isfileobj
 
 sys_is_le = sys.byteorder == 'little'
 native_code = sys_is_le and '<' or '>'
@@ -34,10 +32,9 @@ endian_codes = (# numpy code, aliases
 default_compresslevel = 1
 
 #: convenience variables for numpy types
-floating_point_types = (np.sctypes['complex'] +
-                        np.sctypes['float'])
-integer_types = (np.sctypes['int'] + np.sctypes['uint'])
-numeric_types = floating_point_types + integer_types
+CFLOAT_TYPES = np.sctypes['complex'] + np.sctypes['float']
+IUINT_TYPES = np.sctypes['int'] + np.sctypes['uint']
+NUMERIC_TYPES = CFLOAT_TYPES + IUINT_TYPES
 
 
 class Recoder(object):
@@ -356,7 +353,6 @@ def make_dt_codes(codes_seqs):
     if len0 == 4:
         fields.append('niistring')
     dt_codes = []
-    intp_dt = np.dtype(np.intp)
     for seq in codes_seqs:
         if len(seq) != len0:
             raise ValueError('Sequences must all have the same length')
@@ -410,7 +406,7 @@ def can_cast(in_type, out_type, has_intercept=False, has_slope=False):
     '''
     if np.can_cast(in_type, out_type):
         return True
-    if in_type not in numeric_types or out_type not in numeric_types:
+    if in_type not in NUMERIC_TYPES or out_type not in NUMERIC_TYPES:
         return False
     if out_type in np.sctypes['complex']:
         return True
@@ -832,7 +828,7 @@ def finite_range(arr):
     stride_order = np.argsort(arr.strides)[::-1]
     sarr = arr.transpose(stride_order)
     typ = sarr.dtype.type
-    if typ in integer_types:
+    if typ in IUINT_TYPES:
         return np.min(sarr), np.max(sarr)
     if typ not in np.sctypes['float']:
         raise TypeError('Can only handle floats and (u)ints')

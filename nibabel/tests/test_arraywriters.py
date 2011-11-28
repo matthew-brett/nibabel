@@ -35,8 +35,10 @@ from ..arraywriters import ScaleInterArrayWriter, ScaleArrayWriter, WriterError
 
 from ..volumeutils import array_from_file
 
+from .test_scaling import promote_scinter
+
 from numpy.testing import (assert_array_almost_equal,
-                           assert_array_equal)
+                           assert_array_equal, dec)
 
 from nose.tools import assert_true, assert_equal, assert_raises
 
@@ -48,6 +50,13 @@ UINT_TYPES = np.sctypes['uint']
 CFLOAT_TYPES = FLOAT_TYPES + COMPLEX_TYPES
 IUINT_TYPES = INT_TYPES + UINT_TYPES
 NUMERIC_TYPES = CFLOAT_TYPES + IUINT_TYPES
+
+have_f16 = True
+try:
+    np.float16
+except AttributeError:
+    have_f16 = False
+
 
 def round_trip(writer, order='F'):
     sio = BytesIO()
@@ -117,5 +126,20 @@ def test_to_float():
                 assert_true(np.all(arr_back[arr < out_min] == -np.inf))
 
 
+@dec.skipif(not have_f16)
 def test_float_int():
     # Conversion between float and int
+    finf = np.finfo(np.float16)
+    arr = np.array([finf.min, finf.max], dtype=np.float16)
+    # int16
+    aw = ScaleInterArrayWriter(arr, np.int16)
+    arr_back = round_trip(aw)
+    scale, inter = promote_scinter(np.int16, aw.scale, aw.inter)
+    arr_back_sc = arr_back * scale + inter
+    assert_true(np.allclose(arr, arr_back_sc, 1e-3))
+    # int32
+    aw = ScaleInterArrayWriter(arr, np.int32)
+    arr_back = round_trip(aw)
+    scale, inter = promote_scinter(np.int32, aw.scale, aw.inter)
+    arr_back_sc = arr_back * scale + inter
+    assert_true(np.allclose(arr, arr_back_sc, 1e-3))

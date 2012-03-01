@@ -62,4 +62,24 @@ class ArrayProxy(object):
             fileobj.close()
         return data
 
+    def state_stamper(self, caller):
+        """ Return stamp for current state of `self`
 
+        The result somewhat uniquely identifies the state of the array proxy.
+        It assumes that the underly ``self.file_like`` does not get modified.
+        Specifically, if you open a file-like object, pass into an arrayproxy
+        (call it ``ap``) and get the stamp (say with ``Stamper()(ap)``, then
+        this stamp will uniquely identify the result of ``np.asarry(ap)`` only
+        if the file-like object has not changed.
+
+        Parameters
+        ----------
+        caller : callable
+            callable object from which this method was called.
+
+        Returns
+        -------
+        stamp : object
+            object unique to this state of `self`
+        """
+        return self.__class__, self.file_like, caller(self.header)

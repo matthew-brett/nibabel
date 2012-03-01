@@ -86,3 +86,31 @@ def test_nifti1_init():
         assert_true(ap.file_like == 'test.nii')
         assert_equal(ap.shape, shape)
         assert_array_equal(np.asarray(ap), arr * 2.0 + 10)
+
+
+def test_state_stamp():
+    # Stamps
+    bio = BytesIO()
+    shape = (2, 3, 4)
+    hdr = FunkyHeader(shape)
+    ap = ArrayProxy(bio, hdr)
+    stamper = Stamper()
+    # The header is unstampable in this case
+    assert_not_equal(stamper(ap), stamper(ap))
+    # Nifti is stampable
+    hdr = Nifti1Header()
+    ap1 = ArrayProxy(bio, hdr)
+    ap2 = ArrayProxy(bio, hdr)
+    assert_equal(stamper(ap1), stamper(ap2))
+    ap3 = ArrayProxy('afilename', hdr)
+    ap4 = ArrayProxy('afilename', hdr)
+    assert_equal(stamper(ap3), stamper(ap4))
+    assert_not_equal(stamper(ap1), stamper(ap3))
+    # write some data to check arr != proxy
+    arr = np.arange(24, dtype=np.int16).reshape(shape) + 100
+    write_raw_data(arr, hdr, bio)
+    # This is the same as ap1 obviously
+    ap5 = ArrayProxy(bio, hdr)
+    arr_back = np.asanyarray(ap5)
+    assert_array_equal(arr, arr_back)
+    assert_not_equal(stamper(arr), stamper(ap5))

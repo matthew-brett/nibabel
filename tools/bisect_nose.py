@@ -35,6 +35,9 @@ for python 2.7 and python 3.2 onwards.
 
 We run the tests in a temporary directory, so the code you are testing must be
 on the python path.
+
+When debugging, you can run this script and echo the return value in bash with
+``echo $?``.
 """
 import os
 import sys
@@ -69,19 +72,25 @@ def main():
                         help='Path to test')
     parser.add_argument('--error-txt', type=str,
                         help='regular expression for error of interest')
-    parser.add_argument('--clean', action='store_true',
+    parser.add_argument('--clean-before', action='store_true',
                         help='Clean git tree before running tests')
-    parser.add_argument('--build', action='store_true',
-                        help='Build git tree before running tests')
+    parser.add_argument('--clean-after', action='store_true',
+                        help='Clean git tree after running tests')
+    parser.add_argument('--build-cmd', type=str,
+                        help='Command to build package')
     # parse the command line
     args = parser.parse_args()
     path = os.path.abspath(args.test_path)
-    if args.clean:
-        print "Cleaning"
+    if args.clean_before:
         call_or_untestable('git clean -fxd')
-    if args.build:
+    if args.build_cmd:
         print "Building"
-        call_or_untestable('python setup.py build_ext -i')
+        try:
+            caller(args.build_cmd)
+        except CalledProcessError:
+            if args.clean_after:
+                call_or_untestable('git clean -fxd')
+            sys.exit(UNTESTABLE)
     cwd = os.getcwd()
     tmpdir = tempfile.mkdtemp()
     try:
@@ -92,6 +101,8 @@ def main():
     finally:
         os.chdir(cwd)
         shutil.rmtree(tmpdir)
+    if args.clean_after:
+        call_or_untestable('git clean -fxd')
     if args.error_txt:
         regex = re.compile(args.error_txt)
         if regex.search(stderr):

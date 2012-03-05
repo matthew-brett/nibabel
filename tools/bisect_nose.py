@@ -38,6 +38,10 @@ on the python path.
 
 When debugging, you can run this script and echo the return value in bash with
 ``echo $?``.
+
+Here is an actual example from a complicated numpy virtualenv run::
+
+    ~/dev_trees/nibabel/tools/bisect_nose.py ~/dev_trees/numpy/numpy/lib/tests/test_io.py --build-cmd="rm -rf $VIRTUAL_ENV/lib/python2.7/site-packages/numpy; python setup.py install" --clean-before --clean-after --error-txt="Bus error"
 """
 import os
 import sys
@@ -72,6 +76,9 @@ def main():
                         help='Path to test')
     parser.add_argument('--error-txt', type=str,
                         help='regular expression for error of interest')
+    parser.add_argument('--error-untest', action='store_true',
+                        help='Commit is untestable if returns non-zero exit '
+                        'code; (ignored without ``error-txt`` option)')
     parser.add_argument('--clean-before', action='store_true',
                         help='Clean git tree before running tests')
     parser.add_argument('--clean-after', action='store_true',
@@ -81,6 +88,8 @@ def main():
     # parse the command line
     args = parser.parse_args()
     path = os.path.abspath(args.test_path)
+    if not args.error_txt and args.error_untest:
+        raise RuntimeError('ERROR_UNTEST option only used with ERROR_TXT')
     if args.clean_before:
         call_or_untestable('git clean -fxd')
     if args.build_cmd:
@@ -90,6 +99,7 @@ def main():
         except CalledProcessError:
             if args.clean_after:
                 call_or_untestable('git clean -fxd')
+                call_or_untestable('git reset --hard')
             sys.exit(UNTESTABLE)
     cwd = os.getcwd()
     tmpdir = tempfile.mkdtemp()
@@ -101,13 +111,16 @@ def main():
     finally:
         os.chdir(cwd)
         shutil.rmtree(tmpdir)
-    if args.clean_after:
+    if args.clean_after: # to make certain a checkout can work
         call_or_untestable('git clean -fxd')
+        call_or_untestable('git reset --hard')
     if args.error_txt:
         regex = re.compile(args.error_txt)
-        if regex.search(stderr):
+        if regex.search(stderr): # the error we were expecting
             sys.exit(BAD)
-        sys.exit(GOOD)
+        if args.error_untest and proc.returncode != 0: # an unexpected error
+            sys.exit(UNTESTABLE)
+        sys.exit(GOOD) # no error
     sys.exit(proc.returncode)
 
 

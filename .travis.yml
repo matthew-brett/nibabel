@@ -19,6 +19,6 @@ install:
     - python setup.py install
 # command to run tests, e.g. python setup.py test
 script:
-    # Change into an innocuous directory to find tests from installation
+    # Change into an innocuous directory and find tests from installation
     - cd doc
-    - nosetests ../nibabel
+    - nosetests `python -c "import os; import nibabel; print(os.path.dirname(nibabel.__file__))"`

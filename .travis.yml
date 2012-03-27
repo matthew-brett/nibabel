@@ -7,9 +7,8 @@ python:
 env:
     NUMPY_VER=1.6.1
 before_install:
-    - pushd
     - mkdir builds
-    - cd builds
+    - pushd builds
     - curl -O http://pypi.python.org/packages/source/n/numpy/numpy-${NUMPY_VER}.tar.gz
     - tar zxf numpy-${NUMPY_VER}.tar.gz
     - cd numpy-${NUMPY_VER}

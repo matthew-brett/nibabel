@@ -28,7 +28,7 @@ try:
     from nibabel.arraywriters import ScalingError
 except ImportError:
     class ScalingError(object): pass
-
+from nibabel.casting import type_info, floor_log2
 
 def round_trip(arr, out_dtype):
     img = Nifti1Image(arr, np.eye(4))
@@ -59,7 +59,13 @@ def check_params(in_arr, in_type, out_type):
         arr_dash, slope, inter = round_trip(arr, out_type)
     except (ScalingError, HeaderDataError):
         return arr, None, None
-    return arr, arr_dash, slope
+    return arr, arr_dash, slope, inter
+
+
+def biggest_gap(val):
+    aval = np.abs(val)
+    info = type_info(val.dtype)
+    return 2**(floor_log2(aval) - info['nmant'])
 
 
 if __name__ == '__main__':
@@ -79,7 +85,7 @@ if __name__ == '__main__':
         for j, in_type in enumerate(in_types):
             for k, out_type in enumerate(out_types):
                 print sd, out_type, in_type
-                arr, arr_dash, slope = check_params(V_in, in_type, out_type)
+                arr, arr_dash, slope, inter = check_params(V_in, in_type, out_type)
                 if arr_dash is None:
                     outs[i, j, k] = np.nan
                     tests[i, j, k] = np.nan

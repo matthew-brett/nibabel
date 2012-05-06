@@ -27,6 +27,7 @@ from ..nifti1 import Nifti1Header
 from ..loadsave import read_img_data
 from .. import imageglobals
 from ..casting import as_int
+from ..tmpdirs import InTemporaryDirectory
 
 from numpy.testing import (assert_array_equal,
                            assert_array_almost_equal)
@@ -620,6 +621,71 @@ class TestAnalyzeImage(tsi.TestSpatialImage):
         img_str = pickle.dumps(img_prox)
         img2_prox = pickle.loads(img_str)
         assert_array_equal(img.get_data(), img2_prox.get_data())
+
+    def test_vox_offset_rules(self):
+        img_klass = self.image_class
+        data = np.arange(24).reshape((2, 3, 4))
+        affine = np.diag([2, 3, 4, 1])
+        hdr = img_klass.header_class()
+        # save an image to a file map
+        fm = img_klass.make_file_map()
+        for key, value in fm.items():
+            fm[key].fileobj = BytesIO()
+        # Basic round trip
+        img = img_klass(data, affine, hdr)
+        img.to_file_map(fm)
+        img2 = img_klass.from_file_map(fm)
+        assert_array_equal(img2.get_data(), data)
+        # Set image start at some value, round trip
+        fm['image'].pos = 13
+        img.to_file_map(fm)
+        img2 = img_klass.from_file_map(fm)
+        assert_array_equal(img2.get_data(), data)
+        assert_equal(img2.get_header()['vox_offset'], 13)
+        # Set header posthoc to something biggish.  This is a bit of a hack
+        # because the analyze types will do a check to see if the vox_offset is
+        # >= minimum, and set to the minimum if not.  Minimum for nifti1 is 352.
+        # 1000 is to go way above that
+        img.get_header()['vox_offset'] = 1000
+        img.to_file_map(fm)
+        assert_equal(img.get_header()['vox_offset'], 1000)
+        img2 = img_klass.from_file_map(fm)
+        assert_array_equal(img2.get_data(), data)
+        assert_equal(img2.get_header()['vox_offset'], 1000)
+        # Try the same with filenames
+        hdr = img_klass.header_class()
+        img = img_klass(data, affine, hdr)
+        fm = img_klass.make_file_map()
+        for key, value in fm.items():
+            fm[key].filename = 'file0_' + key
+        with InTemporaryDirectory():
+            img.to_file_map(fm)
+            img2 = img_klass.from_file_map(fm)
+            assert_array_equal(img2.get_data(), data)
+            data_len = open(fm['image'].filename, 'rb').seek(0, 2).tell()
+            # And again with prior offset.  This time it is reset
+            hdr['vox_offset'] = 13
+            img = img_klass(data, affine, hdr)
+            fm = img_klass.make_file_map()
+            for key, value in fm.items():
+                fm[key].filename = 'file13_' + key
+            img.to_file_map(fm)
+            img2 = img_klass.from_file_map(fm)
+            assert_array_equal(img2.get_data(), data)
+            # File was still same length, because offset was reset
+            data_len2 = open(fm['image'].filename, 'rb').seek(0, 2).tell()
+            assert_equal(data_len2, data_len)
+            # With post-hoc offset change, offset does change
+            fm = img_klass.make_file_map()
+            for key, value in fm.items():
+                fm[key].filename = 'file1000_' + key
+            img.get_header()['vox_offset'] = 1000
+            img.to_file_map(fm)
+            img2 = img_klass.from_file_map(fm)
+            assert_array_equal(img2.get_data(), data)
+            # Now offset is different
+            data_len2 = open(fm['image'].filename, 'rb').seek(0, 2).tell()
+            assert_equal(data_len2, data_len + 1000)
 
 
 def test_unsupported():

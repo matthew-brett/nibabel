@@ -850,6 +850,16 @@ class AnalyzeImage(SpatialImage):
 
     ImageArrayProxy = ArrayProxy
 
+    def __init__(self, data, affine, header=None,
+                 extra=None, file_map=None):
+        super(AnalyzeImage, self).__init__(data, affine, header, extra,
+                                           file_map)
+        # Set vox_offset as low as possible
+        image_holder = self.file_map['image']
+        self._header['vox_offset'] = image_holder.pos
+
+    __init__.__doc__ = SpatialImage.__init__.__doc__
+
     def get_header(self):
         ''' Return header
         '''

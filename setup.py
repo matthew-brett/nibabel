@@ -11,6 +11,7 @@
 
 import os
 from os.path import join as pjoin
+from glob import glob
 import sys
 
 # BEFORE importing distutils, remove MANIFEST. distutils doesn't properly
@@ -100,9 +101,7 @@ def main(**extra_args):
                            pjoin('nicom', 'tests', 'data', '*'),
                            pjoin('gifti', 'tests', 'data', '*'),
                           ]},
-          scripts      = [pjoin('bin', 'parrec2nii'),
-                          pjoin('bin', 'nib-ls'),
-                          ],
+          scripts      = glob(pjoin('bin', '*')),
           cmdclass = cmdclass,
           **extra_args
          )

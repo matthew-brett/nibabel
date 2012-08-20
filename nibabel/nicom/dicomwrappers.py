@@ -383,6 +383,7 @@ class MultiframeWrapper(Wrapper):
         if dcm_data is None:
             dcm_data = {}
         self.dcm_data = dcm_data
+        self.frame0 = self.dcm_data.PerframeFunctionalGroups[0]
 
     @one_time
     def image_shape(self):
@@ -451,8 +452,8 @@ class MultiframeWrapper(Wrapper):
 
     def _scale_data(self, data):
         pixelTransformations = self.frame0.PixelValueTransformations[0]
-        scale = pixelTransformations.RescaleSlope
-        offset = pixelTransformations.RescaleIntercept
+        scale = float(pixelTransformations.RescaleSlope)
+        offset = float(pixelTransformations.RescaleIntercept)
         if scale != 1:
             if offset == 0:
                 return data * scale

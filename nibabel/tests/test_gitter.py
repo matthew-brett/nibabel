@@ -13,7 +13,7 @@ import shutil
 from os.path import abspath, realpath, join as pjoin
 
 from ..gitter import (have_git, get_git_dir, get_toplevel, get_config,
-                      _parse_config)
+                      _parse_config, parse_attributes, parse_attrfile)
 
 from ..sysutils import bt, bt_or
 
@@ -95,6 +95,102 @@ def test_git_describe():
         assert_equal(bt_or('git describe'), None)
         bt('git tag -a annotated -m "Important point"')
         assert_equal(bt_or('git describe'), 'annotated')
+
+
+def test_parse_attributes():
+    # Parse contents of attribute file
+    assert_equal(parse_attributes('test* anattr'),
+                 ({'test*': {'anattr': True}}, {}))
+    assert_equal(parse_attributes('test*   anattr'),
+                 ({'test*': {'anattr': True}}, {}))
+    assert_equal(parse_attributes('test* \t \t anattr'),
+                 ({'test*': {'anattr': True}}, {}))
+    assert_equal(parse_attributes('test* anattr=true'),
+                 ({'test*': {'anattr': "true"}}, {}))
+    assert_equal(parse_attributes('test* anattr=blah'),
+                 ({'test*': {'anattr': 'blah'}}, {}))
+    assert_equal(parse_attributes('test* anattr=false'),
+                 ({'test*': {'anattr': "false"}}, {}))
+    assert_equal(parse_attributes('test* +anattr'),
+                 ({'test*': {'anattr': True}}, {}))
+    assert_equal(parse_attributes('test* !anattr'),
+                 ({'test*': {'anattr': None}}, {}))
+    # White space at beginning of line does not work
+    assert_equal(parse_attributes(' test* !anattr'),
+                 ({}, {}))
+    # Comments seem to be OK
+    assert_equal(parse_attributes('#test* !anattr'),
+                 ({}, {}))
+    # Macros
+    assert_equal(parse_attributes('[attr]binary -diff +text'),
+                 ({}, {'binary': {'diff': False, 'text': True}}))
+    # Several lines, including blanks and comments
+    in_str = """[attr]binary +diff -text
+ab*     merge=filfre
+
+abc     -foo -bar
+*.c     frotz
+
+# Another macro
+[attr]ducks -baz +bosh
+
+"""
+    defs, macros = parse_attributes(in_str)
+    assert_equal(defs,
+                 {
+                     'ab*': {'merge': 'filfre'},
+                     'abc': {'foo': False, 'bar': False},
+                     '*.c': {'frotz': True}
+                 })
+    assert_equal(macros,
+                 {
+                     'binary': {'diff': True, 'text': False},
+                     'ducks': {'baz': False, 'bosh': True},
+                 })
+    # Edge cases
+    assert_equal(parse_attributes('test anattr='),
+                 ({}, {}))
+    assert_equal(parse_attributes('test =anattr'),
+                 ({}, {}))
+    assert_equal(parse_attributes('test anattr=blah='),
+                 ({}, {}))
+    assert_equal(parse_attributes('test anattr=blah=true'),
+                 ({}, {}))
+    assert_equal(parse_attributes('test !'),
+                 ({}, {}))
+    assert_equal(parse_attributes('test -'),
+                 ({}, {}))
+    assert_equal(parse_attributes('test +'),
+                 ({}, {}))
+
+
+def test_parse_attrfile():
+    # Test parsing of attribute file
+    with InTemporaryDirectory():
+        in_str = """[attr]binary +diff -text
+ab*     merge=filfre
+
+abc     -foo -bar
+*.c     frotz
+
+# Another macro
+[attr]ducks -baz +bosh
+
+"""
+        with open('.gitattributes', 'wt') as fobj:
+            fobj.write(in_str)
+        defs, macros = parse_attrfile('.gitattributes')
+        assert_equal(defs,
+                    {
+                        'ab*': {'merge': 'filfre'},
+                        'abc': {'foo': False, 'bar': False},
+                        '*.c': {'frotz': True}
+                    })
+        assert_equal(macros,
+                    {
+                        'binary': {'diff': True, 'text': False},
+                        'ducks': {'baz': False, 'bosh': True},
+                    })
 
 
 @git_test

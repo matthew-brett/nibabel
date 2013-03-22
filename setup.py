@@ -104,6 +104,7 @@ def main(**extra_args):
                           pjoin('bin', 'nib-ls'),
                           pjoin('bin', 'nib-dicomfs'),
                           pjoin('bin', 'nib-nifti-dx'),
+                          pjoin('bin', 'nib-dpm-tool'),
                           ],
           cmdclass = cmdclass,
           **extra_args

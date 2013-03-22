@@ -313,3 +313,40 @@ def git_init(cmd_name, version=None, greedy=False):
     else:
         _check_describe()
     return 0
+
+
+def cli():
+    """ Command line interface to dpmutils
+    """
+    parser = optparse.OptionParser(
+        usage = "usage: %prog <enversion|deversion|git-init|set-filter>")
+    parser.add_option("-g", "--greedy", action='store_true',
+                      help = "(init command) - let git author claim all "
+                      "unclaimed credit")
+    parser.add_option("--add-version", dest="version", default=None,
+                      metavar="VERSION",
+                      help = "(init command) - commit datapackage.json and "
+                      "add new version named VERSION as annotated git tag")
+    (opts, args) = parser.parse_args()
+    if len(args) == 0:
+        parser.print_help()
+        sys.exit(1)
+    cmd = args[0]
+    if (cmd in ('enversion',
+                'deversion',
+                'init',
+                'set-filter')
+        and not have_git()):
+        sys.stderr.write("You need git on the path for these utilities")
+        sys.exit(128)
+    pth, prog = psplit(sys.argv[0])
+    if cmd == 'enversion':
+        sys.exit(enversion())
+    elif cmd == "deversion":
+        sys.exit(deversion())
+    elif cmd == "git-init":
+        sys.exit(git_init(prog, version=opts.version, greedy=opts.greedy))
+    elif cmd == "set-filter":
+        sys.exit(set_version_filter(FILTER_NAME, prog))
+    parser.print_help()
+    sys.exit(1)

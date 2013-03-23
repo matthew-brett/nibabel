@@ -1,7 +1,8 @@
 .. _data-package-design:
 
+##########################################
 Design of data packages for the nipy suite
-==========================================
+##########################################
 
 See :ref:`data-package-discuss` for a more general discussion of design issues.
 
@@ -21,11 +22,12 @@ case of ``nipy`` itself, there are some test files that live in the module path
 *template data* and *example data* are example of *data packages*.  What
 follows is a discussion of the design and use of data packages.
 
+***************************
 Use cases for data packages
-+++++++++++++++++++++++++++
+***************************
 
-Using the data package
-``````````````````````
+Using an installed data package
+===============================
 
 The programmer will want to use the data something like this:
 
@@ -33,11 +35,12 @@ The programmer will want to use the data something like this:
 
    from nibabel.data import make_datasource
 
-   templates = make_datasource('nipy', 'templates')
+   templates = make_datasource('nipy-templates')
    fname = templates.get_filename('ICBM152', '2mm', 'T1.nii.gz')
-   
-where ``fname`` will be the absolute path to the template image
-``ICBM152/2mm/T1.nii.gz``. 
+
+``nipy-templates`` is a unique package name for the nipy templates package, and
+``fname`` will be the absolute path to the template image
+``ICBM152/2mm/T1.nii.gz``.
 
 The programmer can insist on a particular version of a ``datasource``:
 
@@ -48,16 +51,118 @@ The programmer can insist on a particular version of a ``datasource``:
 
 If the repository cannot find the data, then:
 
->>> make_datasource('nipy', 'implausible')
+>>> make_datasource('nipy-implausible')
 Traceback
  ...
 nibabel.data.DataError
 
 where ``DataError`` gives a helpful warning about why the data was not
-found, and how it should be installed.  
+found, and how it should be installed.
 
-Warnings during installation
-````````````````````````````
+Installing a data package
+=========================
+
+We might like to do something like this::
+
+   from nibabel.data import install_datasource
+   templates = install_datasource('nipy-templates')
+
+That might get the latest version and put it somewhere where it can later be
+found (see below).  By this, I mean, that after the command above, this should
+work in a later session::
+
+   from nibabel.data import make_datasource
+
+   templates = make_datasource('nipy-templates')
+
+Or you could specify and exact version::
+
+   from nibabel.data import install_datasource
+   templates = install_datasource('nipy-templates', version='0.3')
+
+Or a version criterion::
+
+   from nibabel.data import install_datasource
+   templates = install_datasource('nipy-templates', version='>=0.3')
+
+Register a downloaded package
+=============================
+
+You might want to download a package as an archive, or a Debian-like package
+manager may want to put some data somewhere so you can discover it.  In the case
+of the archive, this would work something like (in the shell)::
+
+    \$ cd /some/path
+    \$ unzip nipy-templates-0.3.zip
+    \$ nib-data-tool register nipy-templates-0.3
+
+such that this would work (in Python)::
+
+   from nibabel.data import install_datasource
+   templates = install_datasource('nipy-templates', version='>=0.3')
+
+and discover the version at ``/some/path/nipy-templates-0.3``.
+
+Let's call the directory above a *data package directory*
+
+Data package directory
+    A path containing the contents of a data package
+
+Register a directory as containing packages
+===========================================
+
+It may be convenient to have directories to automatically search for data.
+Let's call such a directory a *data package discovery directory*
+
+Data package discovery directory
+    A path in which sub-directories of the path may be data package directories
+
+The system would automatically search a discovery directory for directories
+containing data packages.  Assume that ``/home/other/path`` is a discovery
+directory.  Then::
+
+    \$ cd /some/other/path
+    \$ unzip nipy-example-data-0.3.zip
+
+Would mean that this would work without further package registration::
+
+   from nibabel.data import install_datasource
+   templates = install_datasource('nipy-example-data', version='>=0.3')
+
+We need both package directories and discovery directories.  We can obviously
+automatically register a package by putting it in a discovery directory.
+However, there may be cases when we want to register a single package without
+having the unintended effect of also registering all packages in the containing
+directory.
+
+User and system data packages
+=============================
+
+The data packages may be large, and the system administrator may want to make
+sure that there is one copy of a data package on the system that any user can
+read or use.  It should be possible for the system administrator to do something
+like::
+
+    \$ cd /read/only/path
+    \$ unzip nipy-example-data-0.3.zip
+
+such that any user can subsequently find the package with::
+
+   from nibabel.data import install_datasource
+   templates = install_datasource('nipy-example-data', version='>=0.3')
+
+Obviously this is the same as giving the system administrator a way of
+registering a data package for all or some users, or specifying a package
+discovery path for all or some users.
+
+The user may not have system administration privileges, and so, will need the
+same ability to register packages directories and discovery directories in
+custom paths to which they have write access.
+
+Warnings during code package installation
+=========================================
+
+This is a minor case.
 
 The example data and template data may be important, and it would be
 useful to warn the user if NIPY cannot find either of the two sets of
@@ -68,21 +173,18 @@ data when installing the package.  Thus::
 will import nipy after installation to check whether these raise an error:
 
 >>> from nibabel.data import make_datasource
->>> template = make_datasource('nipy', 'templates')
->>> example_data = make_datasource('nipy', 'data')
+>>> template = make_datasource('nipy-templates')
+>>> example_data = make_datasource('nipy-example-data')
 
-and warn the user accordingly, with some basic instructions for how to
-install the data.
+and warn the user accordingly, with some basic instructions for how to install
+the data.
 
-.. _find-data:
-
-Finding the data
-````````````````
+Proposed implementation
 
 The routine ``make_datasource`` will need to be able to find the data
 that has been installed.  For the following call:
 
->>> templates = make_datasource('nipy', 'templates')
+>>> templates = make_datasource('nipy-templates')
 
 We propose to:
 
@@ -112,7 +214,7 @@ are:
 #. The result of ``get_nipy_user_dir()``
 
 Requirements for a data package
-```````````````````````````````
+===============================
 
 To be a valid NIPY project data package, you need to satisfy:
 
@@ -135,7 +237,7 @@ under - say - the ```pbrain`` package umbrella, that would go in
 ``/usr/share/nipy/pbrain/packagename``.
 
 Data package format
-```````````````````
+===================
 
 The following tree is an example of the kind of pattern we would expect
 in a data directory, where the ``nipy-data`` and ``nipy-templates``
@@ -171,7 +273,7 @@ giving the version of the data package.
 .. _data-package-design-install:
 
 Installing the data
-```````````````````
+===================
 
 We will use python distutils to install data packages, and the
 ``data_files`` mechanism to install the data.  On Unix, with the
@@ -197,7 +299,7 @@ location to the output of ``nipy.data.get_data_path()`` using one of the mechani
    export NIPY_DATA_PATH=/my/prefix/share/nipy
 
 Packaging for distributions
-```````````````````````````
+===========================
 
 For a particular data package - say ``nipy-templates`` - distributions
 will want to:
@@ -214,7 +316,7 @@ contents::
    path = /usr/share/nipy
 
 Current implementation
-``````````````````````
+======================
 
 This section describes how we (the nipy community) implement data packages at
 the moment.

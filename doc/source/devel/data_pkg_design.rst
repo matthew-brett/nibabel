@@ -159,6 +159,15 @@ The user may not have system administration privileges, and so, will need the
 same ability to register packages directories and discovery directories in
 custom paths to which they have write access.
 
+Setting the data search path
+============================
+
+The use-cases above means that the user and system administrator need to be able
+to add discovery and package paths to the system that will eventually find the
+data.  We propose that the default discovery paths can themselves contain
+configuration files adding discovery paths and package paths.  The discovery
+paths double as configuration file paths.
+
 Warnings during code package installation
 =========================================
 
@@ -179,39 +188,70 @@ will import nipy after installation to check whether these raise an error:
 and warn the user accordingly, with some basic instructions for how to install
 the data.
 
+***********************
 Proposed implementation
+***********************
 
 The routine ``make_datasource`` will need to be able to find the data
-that has been installed.  For the following call:
+that has been installed.
 
 >>> templates = make_datasource('nipy-templates')
 
-We propose to:
+We will make a new object called ``DataCatalog``::
 
-#. Get a list of paths where data is known to be stored with
-   ``nipy.data.get_data_path()``
-#. For each of these paths, search for directory ``nipy/templates``.  If
-   found, and of the correct format (see below), return a datasource,
-   otherwise raise an Exception
+    >>> catalog = DataCatalog()
+    >>> disovery_paths = catalog.discovery_paths()
+    >>> package_paths = catalog.package_paths()
+    >>> catalog.register_package('/path/to/a/package')
+    >>> catalog.add_discovery_path('/path/to/more/data')
+    >>> pkg_names = [pkg.name for name in catalog.found_packages()]
+    >>> pkg = catalog.get_package('nipy-templates', version='0.3')
+    # Add some package at a discovery path and package is found
+    >>> catalog.refresh()
+    >>> pkg = catalog.get_package('another-package', version='1.6')
 
-The paths collected by ``nipy.data.get_data_paths()`` will be
-constructed from ':' (Unix) or ';' separated strings.  The source of the
-strings (in the order in which they will be used in the search above)
-are:
+Notes
+=====
 
-#. The value of the ``NIPY_DATA_PATH`` environment variable, if set
-#. A section = ``DATA``, parameter = ``path`` entry in a
-   ``config.ini`` file in ``nipy_dir`` where ``nipy_dir`` is
-   ``$HOME/.nipy`` or equivalent.
-#. Section = ``DATA``, parameter = ``path`` entries in configuration
-   ``.ini`` files, where the ``.ini`` files are found by
-   ``glob.glob(os.path.join(etc_dir, '*.ini')`` and ``etc_dir`` is
-   ``/etc/nipy`` on Unix, and some suitable equivalent on Windows.
-#. The result of ``os.path.join(sys.prefix, 'share', 'nipy')``
-#. If ``sys.prefix`` is ``/usr``, we add ``/usr/local/share/nipy``. We
-   need this because Python 2.6 in Debian / Ubuntu does default installs
-   to ``/usr/local``.
-#. The result of ``get_nipy_user_dir()``
+On creation ``DataCatalog`` does the following:
+
+#. Gets a list of discovery paths.  It starts with a default set of paths,
+   including a standard system and a standard usr path, but also reads the
+   ``NIPY_DATA_PATH`` variable for extra discovery paths.
+#. Discovery paths can also contain configuration files called
+   ``nipy_data_*.json``, pointing to package paths and other discovery paths.
+#. The configuration files contains none or more of two lists, `discovery_paths`
+   and `package_paths`.  Example::
+
+        {
+        "discovery_paths": [
+            "/usr/local/share/nipy-data",
+            "/some/other/path",
+            "/home/user/.nipy/data"
+        ],
+        "package_paths": [
+            "/some/path/a/package-0.3"
+        ]
+        }
+
+#. On creation, the catalog does a refresh.  This searches the discovery paths
+   for directories containing a file `datapackage.json` in *data package
+   manager* format.  Any such directory is taken to contain a data package.
+   Refresh also loads the `datapackage.json` from found directories, and from
+   directories with specified ``package_path``, an caches metadata.
+#. The default list of discovery paths comes from the following sources in
+   decreasing order of precedence.
+
+    #. The value of the ``NIPY_DISCOVERY_PATH`` environment variable, if set.  This can
+       be a single path or a list of paths as ':' (required on Unix) or ';'
+       (required on Windows) separated strings.
+    #. The string ``<nipy_dir>/data`` ``nipy_dir`` where ``nipy_dir`` is
+       ``$HOME/.nipy`` or equivalent (specifically ``nipy_dir`` is the result of
+       ``nibabel.environment.get_nipy_user_dir()``)
+    #. The result of ``os.path.join(sys.prefix, 'share', 'nipy', 'data')``
+    #. If ``sys.prefix`` is ``/usr``, we add ``/usr/local/share/nipy/data``. We
+       need this because Python 2.6 in Debian / Ubuntu does default installs to
+       ``/usr/local``.
 
 Requirements for a data package
 ===============================

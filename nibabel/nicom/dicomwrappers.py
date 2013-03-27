@@ -384,6 +384,7 @@ class MultiframeWrapper(Wrapper):
             dcm_data = {}
         else:
             self.frame0 = dcm_data.PerFrameFunctionalGroupsSequence[0]
+            self.shared = dcm_data.SharedFunctionalGroupsSequence[0]
         self.dcm_data = dcm_data
         self._shape = None
 
@@ -419,7 +420,10 @@ class MultiframeWrapper(Wrapper):
     def image_orient_patient(self):
         if len(self.dcm_data) == 0:
             raise WrapperError('No dcm_data specified')
-        iop = self.frame0.PlaneOrientationSequence[0].ImageOrientationPatient
+        try:
+            iop = self.shared.PlaneOrientationSequence[0].ImageOrientationPatient
+        except AttributeError:
+            iop = self.frame0.PlaneOrientationSequence[0].ImageOrientationPatient
         if iop is None:
             return None
         iop = np.array((map(float, iop)))
@@ -429,12 +433,18 @@ class MultiframeWrapper(Wrapper):
     def voxel_sizes(self):
         if len(self.dcm_data) == 0:
             raise WrapperError('No dcm_data specified')
-        pix_space = self.frame0.PixelMeasuresSequence[0].PixelSpacing
+        try:
+            pix_space = self.shared.PixelMeasuresSequence[0].PixelSpacing
+        except AttributeError:
+            pix_space = self.frame0.PixelMeasuresSequence[0].PixelSpacing
         if pix_space is None:
             return None
-        zs = self.dcm_data.SpacingBetweenSlices
+        zs = self.get('SpacingBetweenSlices')
         if zs is None:
-            zs = self.frame0.PixelMeasuresSequence[0].SliceThickness
+            try:
+                zs = self.shared.PixelMeasuresSequence[0].SliceThickness
+            except AttributeError:
+                zs = self.frame0.PixelMeasuresSequence[0].SliceThickness
             if zs is None:
                 za = 1
         zs = float(zs)
@@ -445,7 +455,10 @@ class MultiframeWrapper(Wrapper):
     def image_position(self):
         if len(self.dcm_data) == 0:
             raise WrapperError('No dcm_data specified')
-        ipp = self.frame0.PlanePositions[0].ImagePositionPatient
+        try:
+            ipp = self.shared.PlanePositions[0].ImagePositionPatient
+        except AttributeError:
+            ipp = self.frame0.PlanePositions[0].ImagePositionPatient
         if ipp is None:
             return None
         return np.array(map(float, ipp))
@@ -475,18 +488,27 @@ class MultiframeWrapper(Wrapper):
             raise WrapperError('No valid information for image shape')
         n_dim = len(shape)
         if n_dim > 3:
-            data = np.empty(shape, dtype=np.int16)
-            pix_str = self.dcm_data.PixelData
-            vox_per_frame = shape[0] * shape[1]
-            frame_size = 2 * vox_per_frame
-            for count, frame_indices in enumerate(self._frame_indices):
-                data_slice = ([slice(None), slice(None)] + 
-                              [(idx - 1) for idx in frame_indices])
-                data[data_slice] = \
-                    np.fromstring(pix_str[count * frame_size:],
-                                  dtype=np.int16,
-                                  count=vox_per_frame).reshape(shape[:2])
+            data = self.dcm_data.pixel_array
+            
+            #Find the flat frame order
+            order = []
+            for frame_index in self._frame_indices:
+                flat_idx = frame_index[0] - 1
+                mult = shape[2]
+                for dim_idx, dim_size in zip(frame_index[1:], shape[3:]):
+                    flat_idx += (dim_idx - 1) * mult
+                    mult *= dim_size
+                order.append(flat_idx)
+            
+            #Sort the frames, reshape, and then transpose the array
+            sorted_indices = np.argsort(order)
+            data = data[sorted_indices, :, :]
+            data = data.reshape(shape[::-1])
+            dims = range(n_dim)
+            dims_order = dims[-2:] + dims[:-2][::-1]
+            data = data.transpose(dims_order)
         else:
+            #Just need to transpose the array
             data = self.get_pixel_array().transpose(1,2,0)
             
         return self._scale_data(data)

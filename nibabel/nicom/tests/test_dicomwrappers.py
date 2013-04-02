@@ -69,9 +69,12 @@ def test_wrappers():
         assert_raises(KeyError, dw.__getitem__, 'not an item')
         assert_raises(didw.WrapperError, dw.get_data)
         assert_raises(didw.WrapperError, dw.get_affine)
+    # Check default attributes
     for klass in (didw.Wrapper, didw.SiemensWrapper, didw.MultiframeWrapper):
         dw = klass()
         assert_false(dw.is_mosaic)
+        assert_equal(dw.b_matrix, None)
+        assert_equal(dw.q_vector, None)
     for maker in (didw.wrapper_from_data,
                   didw.Wrapper,
                   didw.SiemensWrapper,

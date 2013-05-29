@@ -253,6 +253,33 @@ Here is the start of the relevant section from PS 3.5:
   the Private group specified by the blocks corresponding Private Creator Data
   Element.
 
+Data dictionaries and Value Multiplicity
+----------------------------------------
+
+The DICOM data dictionary of PS 3.6 section 6 lists the (Attribute tag,
+Attribute name, Attribute Keyword, Value Representation, Value Multiplicity) for
+all standard (even tag group) tags.
+
+For example, here is an excerpt from the table in PS 3.6 section 6:
+
++-------------+------------------------------------------+-------------------------------------+----+----+
+| Tag         | Name                                     | Keyword                             | VR | VM |
++=============+==========================================+=====================================+====+====+
+| (0010,0010) | Patient's Name                           | PatientName                         | PN | 1  |
++-------------+------------------------------------------+-------------------------------------+----+----+
+| (0010,0020) | Patient ID                               | PatientID                           | LO | 1  |
++-------------+------------------------------------------+-------------------------------------+----+----+
+| (0010,0021) | Issuer of Patient ID                     | IssuerOfPatientID                   | LO | 1  |
++-------------+------------------------------------------+-------------------------------------+----+----+
+| (0010,0022) | Type of Patient ID                       | TypeOfPatientID                     | CS | 1  |
++-------------+------------------------------------------+-------------------------------------+----+----+
+| (0010,0024) | Issuer of Patient ID Qualifiers Sequence | IssuerOfPatientIDQualifiersSequence | SQ | 1  |
++-------------+------------------------------------------+-------------------------------------+----+----+
+| (0010,0030) | Patient's Birth Date                     | PatientBirthDate                    | DA | 1  |
++-------------+------------------------------------------+-------------------------------------+----+----+
+| (0010,0032) | Patient's Birth Time                     | PatientBirthTime                    | TM | 1  |
++-------------+------------------------------------------+-------------------------------------+----+----+
+
 Value Representation
 --------------------
 

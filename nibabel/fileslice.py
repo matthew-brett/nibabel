@@ -5,12 +5,60 @@ from __future__ import division
 import operator
 import ctypes
 
-from .six.moves import reduce
+from .externals.six.moves import reduce
 
 import numpy as np
 
-# Threshold in bytes for wasted memory to save disk writes
-MEM_THRESH = 1e6
+# Intercept, slope of time costs for different file types in ms, ms / byte
+_TIME_COSTS = dict(
+    bytesio=dict(seek = (2e-6, 0),
+                 read = (0, 6.3e-7)),
+    file=dict(seek = (1.4e-5, 0),
+              read = (0, 1.2e-6)),
+    gzip=dict(seek = (3.7e-5, 6.9e-8),
+              read = (5.7, 4.57e-5)))
+
+# Threshold for memory gap beyond which we always skip, to save memory
+_MEGABYTE = 2**20
+_BYTES_THRESHOLD = _MEGABYTE * 100
+# Price in bytes to pay to save 1 ms
+_BYTES_PER_MS = _BYTES_THRESHOLD
+
+def make_skip_coster(times, bytes_per_ms):
+    """
+    Let's say we are in the middle of reading a file at the start of some memory
+    length $B$ bytes.  We don't need the memory, and we are considering whether
+    to read it anyway (then throw it away) (READ) or stop reading, skip $B$
+    bytes and restart reading from there (SKIP).
+
+    To decide between READ and SKIP we compare time costs.
+
+    SKIP time cost is (time to skip $B$ bytes) + (time to restart read)
+
+    READ time cost is (time to read $B$ bytes)
+
+    The READ option also causes a memory cost of $B$ bytes.  Maybe we can
+    quantify how many bytes $W$ we are prepared to waste in order to save 1
+    millisecond.
+
+    We then add $B / W$ to the READ cost.
+
+    We will (elsewhere) choose SKIP when (SKIP cost - READ cost) < 0
+    """
+    seek_inter, seek_slope = times['seek']
+    read_inter, read_slope = times['read']
+    def skip_coster(gap):
+        if gap > _BYTES_THRESHOLD:
+            return -np.inf # Prefer skip
+        skip_cost = seek_inter + seek_slope * gap + read_inter
+        read_cost = read_slope * gap + gap / bytes_per_ms
+        return skip_cost - read_cost
+    return skip_coster
+
+
+skip_coster_bytesio = make_skip_coster(_TIME_COSTS['bytesio'], _BYTES_PER_MS)
+skip_coster_file = make_skip_coster(_TIME_COSTS['file'], _BYTES_PER_MS)
+skip_coster_gzip = make_skip_coster(_TIME_COSTS['gzip'], _BYTES_PER_MS)
 
 
 def is_fancy(sliceobj):
@@ -227,8 +275,11 @@ def _positive_slice(slicer):
     return slice(end, start+1, -step)
 
 
-def _space_heuristic(slicer, dim_len, stride):
-    """ Educated guess at thresholds to choose full and continuous
+def _space_heuristic(slicer,
+                     dim_len,
+                     stride,
+                     skip_coster=None):
+    """ Whether to force full axis read or contiguous read of stepped slice
 
     Allows ``fileslice`` to sometimes read memory that it will throw away in
     order to get maximum speed.  In other words, trade memory for fewer disk
@@ -242,22 +293,31 @@ def _space_heuristic(slicer, dim_len, stride):
         length of axis being sliced
     stride : int
         memory distance between elements on this axis
+    skip_coster : None or callable
+        function returning cost for seek as opposed to read for a given memory
+        gap in bytes.  Positive values mean seek is more expensive than read.
+        None gives default for ordinary python files.
 
     Returns
     -------
-    action : {'read-full', 'read-partial', None}
-        * 'read-full' - read whole axis
-        * 'read-partial' - read between start and stop
+    action : {'full', 'contiguous', None}
+        * 'full' - read whole axis
+        * 'contiguous' - read between start and stop
         * None - read only memory needed for output
+
+    Notes
+    -----
+    See docstring for the ``make_skip_coster`` function
     """
+    if skip_coster is None:
+        skip_coster = skip_coster_file
+    step_size = abs(slicer.step) * stride
+    if skip_coster(step_size) <= 0:
+        return None # Prefer skip
     slicer = _positive_slice(slicer)
     start, stop, step = slicer.start, slicer.stop, slicer.step
-    gap = stop - start
-    n = int(np.ceil(gap / step))
-    if not step * stride < MEM_THRESH / n:
-        return None
-    end_gap = dim_len - gap
-    return 'read-full' if end_gap * stride < MEM_THRESH else 'read-partial'
+    gap_size = (stop - start) * stride
+    return 'contiguous' if skip_coster(gap_size) <= 0 else 'full'
 
 
 def _analyze_slice(slicer, dim_len, all_full, stride,
@@ -275,7 +335,7 @@ def _analyze_slice(slicer, dim_len, all_full, stride,
         size of one step along this axis
     heuristic : callable, optional
         function taking slice object, dim_len, stride length as arguments,
-        returning one of 'full-read', 'partial-read', None.
+        returning one of 'full', 'contiguous', None.
 
     Returns
     -------
@@ -323,16 +383,19 @@ def _analyze_slice(slicer, dim_len, all_full, stride,
     typestr = 'contiguous' if slicer.step in (1, -1) else None
     if all_full:
         action = heuristic(slicer, dim_len, stride)
-        if action == 'full-read':
+        if action == 'full':
             return slice(None), slicer, 'full'
-        if action == 'partial-read' and typestr != 'contiguous':
-            # continuous case handled by default below
-            step = slicer.step
-            if step < 0:
-                slicer = _positive_slice(slicer)
-            return (slice(slicer.start, slicer.stop, 1),
-                    slice(None, None, step),
-                    'contiguous')
+        elif action == 'contiguous':
+            # If this is already contiguous, default None behavior handles it
+            if typestr != 'contiguous':
+                step = slicer.step
+                if step < 0:
+                    slicer = _positive_slice(slicer)
+                return (slice(slicer.start, slicer.stop, 1),
+                        slice(None, None, step),
+                        'contiguous')
+        elif action != None:
+            raise ValueError('Unexpected return %s from heuristic' % action)
     # We only need to be positive
     if slicer.step > 0:
         return slicer, slice(None), typestr
@@ -357,7 +420,7 @@ def _get_segments(sliceobj, in_shape, itemsize, offset, order,
         memory layout of underlying array
     heuristic : callable, optional
         function taking slice object, dim_len, stride length as arguments,
-        returning one of 'full-read', 'partial-read', None.  See
+        returning one of 'full', 'contiguous', None.  See
         ``_analyze_slice``.
 
     Returns
@@ -464,7 +527,7 @@ def _read_segments(fileobj, segments, n_bytes):
     if len(segments) == 0:
         if n_bytes != 0:
             raise ValueError("No segments, but non-zero n_bytes")
-        return ''
+        return b''
     if len(segments) == 1:
         offset, length = segments[0]
         fileobj.seek(offset)

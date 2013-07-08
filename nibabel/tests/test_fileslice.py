@@ -193,9 +193,9 @@ def test__positive_slice():
 
 # Some dummy heuristics for _analyze_slice
 def _always(slicer, dim_len, stride):
-    return 'full-read'
+    return 'full'
 def _partial(slicer, dim_len, stride):
-    return 'partial-read'
+    return 'contiguous'
 def _never(slicer, dim_len, stride):
     return None
 

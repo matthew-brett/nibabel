@@ -398,8 +398,8 @@ def test__read_segments():
 
 
 def test_fileslice():
-    shapes = (15, 16, 17, 18)
-    for n_dim in range(1, len(shapes)):
+    shapes = (15, 16, 17)
+    for n_dim in range(1, len(shapes) + 1):
         shape = shapes[:n_dim]
         arr = np.arange(np.prod(shape)).reshape(shape)
         for order in 'FC':
@@ -410,6 +410,7 @@ def test_fileslice():
                 slicers_list = []
                 for i in range(n_dim):
                     slicers_list.append(_slices_for_len(shape[i]))
+                    print("Here", n_dim, i, slicers_list)
                     for sliceobj in product(*slicers_list):
                         _check_slicer(sliceobj, arr, fobj, offset, order)
     # Try some Nones and Ellipses

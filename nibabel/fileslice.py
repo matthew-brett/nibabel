@@ -262,7 +262,9 @@ def _space_heuristic(slicer,
 
     We could do more fancy things, but here I looked at some time / memory gap
     cost plots, and it seemed that when the gap was larger than about 2K, the
-    cost for skipping was very small, so I added this as a hard threshold.
+    cost for skipping was very small, so I added this as a hard threshold.  See
+    ``tools/seek_read_benches.py`` in the source distribution for the
+    investigation.
     """
     step_size = abs(slicer.step) * stride
     if step_size <= SKIP_THRESH:

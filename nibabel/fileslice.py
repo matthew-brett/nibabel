@@ -239,8 +239,8 @@ def _space_heuristic(slicer,
 
     Parameters
     ----------
-    slicer : slice object
-        Can be assumed to be full as in ``fill_slicer``
+    slicer : slice object, or int
+        If slice, can be assumed to be full as in ``fill_slicer``
     dim_len : int
         length of axis being sliced
     stride : int
@@ -266,12 +266,16 @@ def _space_heuristic(slicer,
     ``tools/seek_read_benches.py`` in the source distribution for the
     investigation.
     """
+    if isinstance(slicer, int):
+        gap_size = dim_len - 1
+        return 'full' if gap_size <= SKIP_THRESH else None
     step_size = abs(slicer.step) * stride
     if step_size <= SKIP_THRESH:
         return None # Prefer skip
     slicer = _positive_slice(slicer)
     start, stop, step = slicer.start, slicer.stop, slicer.step
-    gap_size = (stop - start) * stride
+    read_len = stop - start
+    gap_size = (dim_len - read_len) * stride
     return 'contiguous' if gap_size <= SKIP_THRESH else 'full'
 
 
@@ -281,7 +285,7 @@ def _analyze_slice(slicer, dim_len, all_full, stride,
 
     Parameters
     ----------
-    slicer : slice object
+    slicer : slice object or int
     dim_len : int
         length of axis along which to slice
     all_full : bool
@@ -294,7 +298,7 @@ def _analyze_slice(slicer, dim_len, all_full, stride,
 
     Returns
     -------
-    to_read : slice object
+    to_read : slice object or int
         maybe modified slice based on `slicer` expressing what data should be
         read from an underlying file or buffer. `to_read` must always have
         positive ``step`` (because we don't want to go backwards in the buffer /
@@ -326,23 +330,35 @@ def _analyze_slice(slicer, dim_len, all_full, stride,
     Otherwise (apart from constraint to be positive) return `to_read` unaltered
     and `post_slice` as ``slice(None)``
     """
-    # Deal with full cases first
-    if slicer == slice(None):
-        return slicer, slicer, 'full'
-    slicer = fill_slicer(slicer, dim_len)
-    # actually equivalent to slice(None)
-    if slicer == slice(0, dim_len, 1):
-        return slice(None), slice(None), 'full'
-    # full, but reversed
-    if slicer == slice(dim_len-1, None, -1):
-        return slice(None), slice(None, None, -1), 'full'
-    # Not full, mabye continuous
-    typestr = 'contiguous' if slicer.step in (1, -1) else None
+    # int or slice as input?
+    try: # if int - we drop a dim (no append)
+        slicer = int(slicer) # casts float to int as well
+    except TypeError: # slice
+        # Deal with full cases first
+        if slicer == slice(None):
+            return slicer, slicer, 'full'
+        slicer = fill_slicer(slicer, dim_len)
+        # actually equivalent to slice(None)
+        if slicer == slice(0, dim_len, 1):
+            return slice(None), slice(None), 'full'
+        # full, but reversed
+        if slicer == slice(dim_len-1, None, -1):
+            return slice(None), slice(None, None, -1), 'full'
+        # Not full, mabye continuous
+        typestr = 'contiguous' if slicer.step in (1, -1) else None
+        is_int = False
+    else: # int
+        if slicer < 0: # make negative offsets positive
+            slicer = dim_len + slicer
+        typestr = None
+        is_int = True
     if all_full:
         action = heuristic(slicer, dim_len, stride)
         if action == 'full':
             return slice(None), slicer, 'full'
         elif action == 'contiguous':
+            if is_int:
+                raise ValueError("int index cannot be continuous")
             # If this is already contiguous, default None behavior handles it
             if typestr != 'contiguous':
                 step = slicer.step
@@ -354,7 +370,7 @@ def _analyze_slice(slicer, dim_len, all_full, stride,
         elif action != None:
             raise ValueError('Unexpected return %s from heuristic' % action)
     # We only need to be positive
-    if slicer.step > 0:
+    if is_int or slicer.step > 0:
         return slicer, slice(None), typestr
     return _positive_slice(slicer), slice(None, None, -1), typestr
 

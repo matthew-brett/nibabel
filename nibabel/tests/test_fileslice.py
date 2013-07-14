@@ -290,6 +290,22 @@ def test__analyze_slice():
     assert_equal(
         _analyze_slice(slice(2, 8, 2), 10, True, 4, _partial),
         (slice(2, 8, 1), slice(None, None, 2), 'contiguous'))
+    # integer
+    assert_equal(
+        _analyze_slice(0, 10, True, 4, _never),
+        (0, slice(None), None))
+    assert_equal( # can be negative
+        _analyze_slice(-1, 10, True, 4, _never),
+        (9, slice(None), None))
+    assert_equal( # or float
+        _analyze_slice(0.9, 10, True, 4, _never),
+        (0, slice(None), None))
+    assert_raises(ValueError, # should never get 'contiguous'
+        _analyze_slice, 0, 10, True, 4, _partial)
+    assert_equal( # full depends on gap
+        _analyze_slice(0, 10, True, 4, _always),
+        (slice(None), 0, 'full'))
+
 
 
 def test__get_segments():

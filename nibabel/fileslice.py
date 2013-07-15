@@ -558,10 +558,6 @@ def fileslice(fileobj, sliceobj, shape, dtype, offset=0, order='C'):
     """
     if is_fancy(sliceobj):
         raise ValueError("Cannot handle fancy indexing")
-    # Temporary hack to make tests pass
-    # return _simple_fileslice(
-    #   fileobj, sliceobj, shape, dtype, offset=offset, order=order)
-    # Code that may work someday
     itemsize = dtype.itemsize
     segments, sliced_shape, post_slicers = _get_segments(
         sliceobj, shape, itemsize, offset, order)

@@ -230,7 +230,8 @@ def _positive_slice(slicer):
 
 def _space_heuristic(slicer,
                      dim_len,
-                     stride):
+                     stride,
+                     skip_thresh=SKIP_THRESH):
     """ Whether to force full axis read or contiguous read of stepped slice
 
     Allows ``fileslice`` to sometimes read memory that it will throw away in
@@ -245,6 +246,9 @@ def _space_heuristic(slicer,
         length of axis being sliced
     stride : int
         memory distance between elements on this axis
+    skip_thresh : int, optional
+        Memory gap threshold in bytes above which to prefer skipping memory
+        rather than reading it and later discarding.
 
     Returns
     -------
@@ -267,19 +271,20 @@ def _space_heuristic(slicer,
     investigation.
     """
     if isinstance(slicer, int):
-        gap_size = dim_len - 1
-        return 'full' if gap_size <= SKIP_THRESH else None
+        gap_size = (dim_len - 1) * stride
+        return 'full' if gap_size <= skip_thresh else None
     step_size = abs(slicer.step) * stride
-    if step_size <= SKIP_THRESH:
+    if step_size > skip_thresh:
         return None # Prefer skip
+    # At least contiguous - also full?
     slicer = _positive_slice(slicer)
     start, stop, step = slicer.start, slicer.stop, slicer.step
     read_len = stop - start
     gap_size = (dim_len - read_len) * stride
-    return 'contiguous' if gap_size <= SKIP_THRESH else 'full'
+    return 'full' if gap_size <= skip_thresh else 'contiguous'
 
 
-def _analyze_slice(slicer, dim_len, all_full, stride,
+def _analyze_slice(slicer, dim_len, all_full, is_slowest, stride,
                    heuristic=_space_heuristic):
     """ Return maybe modified slice and post-slice slicing for `slicer`
 
@@ -290,6 +295,8 @@ def _analyze_slice(slicer, dim_len, all_full, stride,
         length of axis along which to slice
     all_full : bool
         Whether dimensions up until now have been full (all elements)
+    is_slowest : bool
+        Whether this dimension is the slowest changing in memory / on disk
     stride : int
         size of one step along this axis
     heuristic : callable, optional
@@ -354,11 +361,19 @@ def _analyze_slice(slicer, dim_len, all_full, stride,
         is_int = True
     if all_full:
         action = heuristic(slicer, dim_len, stride)
+        # Check return values (we may be using a custom function)
+        if action not in ('full', 'contiguous', None):
+            raise ValueError('Unexpected return %s from heuristic' % action)
+        if is_int and action == 'contiguous':
+            raise ValueError("int index cannot be contiguous")
+        # If this is the slowest changing dimension, never upgrade None or
+        # contiguous beyond contiguous (we've already covered the already-full
+        # case)
+        if is_slowest and action == 'full':
+            action = None if is_int else 'contiguous'
         if action == 'full':
             return slice(None), slicer, 'full'
         elif action == 'contiguous':
-            if is_int:
-                raise ValueError("int index cannot be continuous")
             # If this is already contiguous, default None behavior handles it
             if typestr != 'contiguous':
                 step = slicer.step
@@ -367,8 +382,6 @@ def _analyze_slice(slicer, dim_len, all_full, stride,
                 return (slice(slicer.start, slicer.stop, 1),
                         slice(None, None, step),
                         'contiguous')
-        elif action != None:
-            raise ValueError('Unexpected return %s from heuristic' % action)
     # We only need to be positive
     if is_int or slicer.step > 0:
         return slicer, slice(None), typestr
@@ -419,7 +432,6 @@ def _get_segments(sliceobj, in_shape, itemsize, offset, order,
     out_shape = []
     all_segments = [[offset, itemsize]]
     new_slicing = []
-    need_new_slicing = False
     real_no = 0
     stride = itemsize
     for slicer in sliceobj:
@@ -427,47 +439,42 @@ def _get_segments(sliceobj, in_shape, itemsize, offset, order,
             out_shape.append(1)
             new_slicing.append(slice(None))
             continue
+        # int or slice
         dim_len = in_shape[real_no]
         real_no += 1
-        # int or slice
-        try: # if int - we drop a dim (no append)
-            slicer = int(slicer)
-        except TypeError:
-            pass # We deal with slices later
-        else: # integer
-            if slicer < 0:
-                slicer = dim_len + slicer
-            for segment in all_segments:
-                segment[0] += stride * slicer
-            all_full = False
-            stride *= dim_len
-            continue
-        # slices
+        is_last = real_no == len(in_shape)
         # make modified sliceobj (to_read, post_slice)
         to_read_slicer, post_slice_slicer, typestr = _analyze_slice(
-            slicer, dim_len, all_full, stride, heuristic)
-        to_read_slicer = fill_slicer(to_read_slicer, dim_len)
-        slice_len = _full_slicer_len(to_read_slicer)
-        out_shape.append(slice_len)
-        if post_slice_slicer != slice(None):
-            need_new_slicing = True
-        new_slicing.append(post_slice_slicer)
+            slicer, dim_len, all_full, is_last, stride, heuristic)
+        read_is_int = isinstance(to_read_slicer, int)
+        if not read_is_int: # slicer is (now) a slice
+            # make slice full (it will always be positive)
+            to_read_slicer = fill_slicer(to_read_slicer, dim_len)
+            slice_len = _full_slicer_len(to_read_slicer)
+            # Add this non-zero output dimension to out_shape
+            out_shape.append(slice_len)
+            # Add any new slicing to post_slice_slicer
+            new_slicing.append(post_slice_slicer)
+        # print "Here again", slicer, to_read_slicer, typestr
         if all_full and typestr in ('full', 'contiguous'):
             if to_read_slicer.start != 0:
                 all_segments[0][0] += stride * to_read_slicer.start
             all_segments[0][1] *= slice_len
-            all_full = typestr == 'full'
         else: # Previous or current stuff is not contiguous
-            segments = all_segments
-            all_segments = []
-            for i in range(to_read_slicer.start,
-                           to_read_slicer.stop,
-                           to_read_slicer.step):
-                for s in segments:
-                    all_segments.append([s[0] + stride * i, s[1]])
-            all_full = False
+            if read_is_int:
+                for segment in all_segments:
+                    segment[0] += stride * slicer
+            else: # slice object
+                segments = all_segments
+                all_segments = []
+                for i in range(to_read_slicer.start,
+                               to_read_slicer.stop,
+                               to_read_slicer.step):
+                    for s in segments:
+                        all_segments.append([s[0] + stride * i, s[1]])
+        all_full = all_full and typestr == 'full'
         stride *= dim_len
-    if not need_new_slicing:
+    if all(s == slice(None) for s in new_slicing):
         new_slicing = []
     # If reordered, order shape, new_slicing
     if order == 'C':

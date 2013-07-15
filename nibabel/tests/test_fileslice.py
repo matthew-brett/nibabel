@@ -7,8 +7,8 @@ import numpy as np
 
 from ..fileslice import (is_fancy, canonical_slicers, fileslice,
                          predict_shape, _read_segments, _positive_slice,
-                         _analyze_slice, slice2len, fill_slicer,
-                        _get_segments)
+                         _space_heuristic, _analyze_slice, slice2len,
+                         fill_slicer, _get_segments)
 
 from nose.tools import assert_true, assert_false, assert_equal, assert_raises
 
@@ -191,6 +191,47 @@ def test__positive_slice():
     assert_equal(_positive_slice(slice(4, 1, -2)), slice(2, 5, 2))
 
 
+def test__space_heuristic():
+    # Test for default skip / read heuristic
+    # int
+    assert_equal(_space_heuristic(1, 9, 1, skip_thresh=8), 'full')
+    assert_equal(_space_heuristic(1, 9, 1, skip_thresh=7), None)
+    assert_equal(_space_heuristic(1, 9, 2, skip_thresh=16), 'full')
+    assert_equal(_space_heuristic(1, 9, 2, skip_thresh=15), None)
+    # full slice, smallest step size
+    assert_equal(_space_heuristic(
+        slice(0, 9, 1), 9, 2, skip_thresh=2),
+        'full')
+    # Dropping skip thresh below step size gives None
+    assert_equal(_space_heuristic(
+        slice(0, 9, 1), 9, 2, skip_thresh=1),
+        None)
+    # As does increasing step size
+    assert_equal(_space_heuristic(
+        slice(0, 9, 2), 9, 2, skip_thresh=3),
+        None)
+    # Negative step size same as positive
+    assert_equal(_space_heuristic(
+        slice(9, None, -1), 9, 2, skip_thresh=2),
+        'full')
+    # Add a gap between start and end. Now contiguous because of step size
+    assert_equal(_space_heuristic(
+        slice(2, 9, 1), 9, 2, skip_thresh=2),
+        'contiguous')
+    # To not-contiguous, even with step size 1
+    assert_equal(_space_heuristic(
+        slice(2, 9, 1), 9, 2, skip_thresh=1),
+        None)
+    # Back to full when skip covers gap
+    assert_equal(_space_heuristic(
+        slice(2, 9, 1), 9, 2, skip_thresh=4),
+        'full')
+    # Until it doesn't cover the gap
+    assert_equal(_space_heuristic(
+        slice(2, 9, 1), 9, 2, skip_thresh=3),
+        'contiguous')
+
+
 # Some dummy heuristics for _analyze_slice
 def _always(slicer, dim_len, stride):
     return 'full'
@@ -212,104 +253,124 @@ def test__analyze_slice():
     # - make positive slicer
     for all_full in (True, False):
         for heuristic in (_always, _never, _partial):
-            # following tests not affected by all_full or optimization
-            # full - always passes through
-            assert_equal(
-                _analyze_slice(slice(None), 10, all_full, 4, heuristic),
-                (slice(None), slice(None), 'full'))
-            # Even if full specified with explicit values
-            assert_equal(
-                _analyze_slice(slice(10), 10, all_full, 4, heuristic),
-                (slice(None), slice(None), 'full'))
-            assert_equal(
-                _analyze_slice(slice(0, 10), 10, all_full, 4, heuristic),
-                (slice(None), slice(None), 'full'))
-            assert_equal(
-                _analyze_slice(slice(0, 10, 1), 10, all_full, 4, heuristic),
-                (slice(None), slice(None), 'full'))
-            # Reversed full is still full, but with reversed post_slice
-            assert_equal(
-                _analyze_slice(
-                    slice(None, None, -1), 10, all_full, 4, heuristic),
-                (slice(None), slice(None, None, -1), 'full'))
+            for is_slowest in (True, False):
+                # following tests not affected by all_full or optimization
+                # full - always passes through
+                assert_equal(
+                    _analyze_slice(slice(None), 10, all_full, 4, heuristic),
+                    (slice(None), slice(None), 'full'))
+                # Even if full specified with explicit values
+                assert_equal(
+                    _analyze_slice(slice(10), 10, all_full, 4, heuristic),
+                    (slice(None), slice(None), 'full'))
+                assert_equal(
+                    _analyze_slice(slice(0, 10), 10, all_full, 4, heuristic),
+                    (slice(None), slice(None), 'full'))
+                assert_equal(
+                    _analyze_slice(slice(0, 10, 1), 10, all_full, 4, heuristic),
+                    (slice(None), slice(None), 'full'))
+                # Reversed full is still full, but with reversed post_slice
+                assert_equal(
+                    _analyze_slice(
+                        slice(None, None, -1), 10, all_full, 4, heuristic),
+                    (slice(None), slice(None, None, -1), 'full'))
     # Contiguous is contiguous unless heuristic kicks in, in which case it may
     # be 'full'
     assert_equal(
-        _analyze_slice(slice(9), 10, False, 4, _always),
+        _analyze_slice(slice(9), 10, False, False, 4, _always),
         (slice(0, 9, 1), slice(None), 'contiguous'))
     assert_equal(
-        _analyze_slice(slice(9), 10, True, 4, _always),
+        _analyze_slice(slice(9), 10, True, False, 4, _always),
         (slice(None), slice(0, 9, 1), 'full'))
+    # Unless this is the slowest dimenion, and all_true is True, in which case
+    # we don't update to full
     assert_equal(
-        _analyze_slice(slice(9), 10, True, 4, _never),
+        _analyze_slice(slice(9), 10, True, True, 4, _always),
+        (slice(0, 9, 1), slice(None), 'contiguous'))
+    # Nor if the heuristic won't update
+    assert_equal(
+        _analyze_slice(slice(9), 10, True, False, 4, _never),
         (slice(0, 9, 1), slice(None), 'contiguous'))
     assert_equal(
-        _analyze_slice(slice(1, 10), 10, True, 4, _never),
+        _analyze_slice(slice(1, 10), 10, True, False, 4, _never),
         (slice(1, 10, 1), slice(None), 'contiguous'))
     # Reversed contiguous still contiguous
     assert_equal(
-        _analyze_slice(slice(8, None, -1), 10, False, 4, _never),
+        _analyze_slice(slice(8, None, -1), 10, False, False, 4, _never),
         (slice(0, 9, 1), slice(None, None, -1), 'contiguous'))
     assert_equal(
-        _analyze_slice(slice(8, None, -1), 10, True, 4, _always),
+        _analyze_slice(slice(8, None, -1), 10, True, False, 4, _always),
         (slice(None), slice(8, None, -1),  'full'))
     assert_equal(
-        _analyze_slice(slice(8, None, -1), 10, False, 4, _never),
+        _analyze_slice(slice(8, None, -1), 10, False, False, 4, _never),
         (slice(0, 9, 1), slice(None, None, -1), 'contiguous'))
     assert_equal(
-        _analyze_slice(slice(9, 0, -1), 10, False, 4, _never),
+        _analyze_slice(slice(9, 0, -1), 10, False, False, 4, _never),
         (slice(1, 10, 1), slice(None, None, -1), 'contiguous'))
     # Non-contiguous
     assert_equal(
-        _analyze_slice(slice(0, 10, 2), 10, False, 4, _never),
+        _analyze_slice(slice(0, 10, 2), 10, False, False, 4, _never),
         (slice(0, 10, 2), slice(None), None))
     # all_full triggers optimization, but optimization does nothing
     assert_equal(
-        _analyze_slice(slice(0, 10, 2), 10, True, 4, _never),
+        _analyze_slice(slice(0, 10, 2), 10, True, False, 4, _never),
         (slice(0, 10, 2), slice(None), None))
     # all_full triggers optimization, optimization does something
     assert_equal(
-        _analyze_slice(slice(0, 10, 2), 10, True, 4, _always),
+        _analyze_slice(slice(0, 10, 2), 10, True, False, 4, _always),
         (slice(None), slice(0, 10, 2), 'full'))
     # all_full disables optimization, optimization does something
     assert_equal(
-        _analyze_slice(slice(0, 10, 2), 10, False, 4, _always),
+        _analyze_slice(slice(0, 10, 2), 10, False, False, 4, _always),
         (slice(0, 10, 2), slice(None), None))
     # Non contiguous, reversed
     assert_equal(
-        _analyze_slice(slice(10, None, -2), 10, False, 4, _never),
+        _analyze_slice(slice(10, None, -2), 10, False, False, 4, _never),
         (slice(1, 10, 2), slice(None, None, -1), None))
     assert_equal(
-        _analyze_slice(slice(10, None, -2), 10, True, 4, _always),
+        _analyze_slice(slice(10, None, -2), 10, True, False, 4, _always),
         (slice(None), slice(9, None, -2), 'full'))
     # Short non-contiguous
     assert_equal(
-        _analyze_slice(slice(2, 8, 2), 10, False, 4, _never),
+        _analyze_slice(slice(2, 8, 2), 10, False, False, 4, _never),
         (slice(2, 8, 2), slice(None), None))
     # with partial read
     assert_equal(
-        _analyze_slice(slice(2, 8, 2), 10, True, 4, _partial),
+        _analyze_slice(slice(2, 8, 2), 10, True, False, 4, _partial),
         (slice(2, 8, 1), slice(None, None, 2), 'contiguous'))
+    # If this is the slowest changing dimension, heuristic can upgrade None to
+    # contiguous, but not (None, contiguous) to full
+    assert_equal( # we've done this one already
+        _analyze_slice(slice(0, 10, 2), 10, True, False, 4, _always),
+        (slice(None), slice(0, 10, 2), 'full'))
+    assert_equal( # if slowest, just upgrade to contiguous
+        _analyze_slice(slice(0, 10, 2), 10, True, True, 4, _always),
+        (slice(0, 10, 1), slice(None, None, 2), 'contiguous'))
+    assert_equal( # contiguous does not upgrade to full
+        _analyze_slice(slice(9), 10, True, True, 4, _always),
+        (slice(0, 9, 1), slice(None), 'contiguous'))
     # integer
     assert_equal(
-        _analyze_slice(0, 10, True, 4, _never),
+        _analyze_slice(0, 10, True, False, 4, _never),
         (0, slice(None), None))
     assert_equal( # can be negative
-        _analyze_slice(-1, 10, True, 4, _never),
+        _analyze_slice(-1, 10, True, False, 4, _never),
         (9, slice(None), None))
     assert_equal( # or float
-        _analyze_slice(0.9, 10, True, 4, _never),
+        _analyze_slice(0.9, 10, True, False, 4, _never),
         (0, slice(None), None))
     assert_raises(ValueError, # should never get 'contiguous'
-        _analyze_slice, 0, 10, True, 4, _partial)
-    assert_equal( # full depends on gap
-        _analyze_slice(0, 10, True, 4, _always),
+        _analyze_slice, 0, 10, True, False, 4, _partial)
+    assert_equal( # full can be forced with heuristic
+        _analyze_slice(0, 10, True, False, 4, _always),
         (slice(None), 0, 'full'))
-
+    assert_equal( # but disabled for slowest changing dimension
+        _analyze_slice(0, 10, True, True, 4, _always),
+        (0, slice(None), None))
 
 
 def test__get_segments():
-    # Check get_segments routine.  This thing is hugs and a bear to test
+    # Check get_segments routine.  This thing is huge and a bear to test
     segments, out_shape, new_slicing = _get_segments(
         (1,), (10,), 4, 7, 'F', _never)
     assert_equal(segments, [[11, 4]])
@@ -364,6 +425,21 @@ def test__get_segments():
         _get_segments((slice(None), slice(1, 5)), (10, 6), 4, 7, 'F', _never),
         ([[47, 160]],
          (10, 4),
+         (),
+        ))
+    # Check effect of heuristic on _get_segments
+    # Even integer slices can generate full when heuristic says so
+    assert_equal(
+        _get_segments((1, slice(None)), (10, 6), 4, 7, 'F', _always),
+        ([[7, 10 * 6 * 4]],
+         (10, 6),
+         (1, slice(None)),
+        ))
+    # Except when last
+    assert_equal(
+        _get_segments((slice(None), 1), (10, 6), 4, 7, 'F', _always),
+        ([[7 + 10 * 4, 10 * 4]],
+         (10,),
          (),
         ))
 
@@ -426,7 +502,6 @@ def test_fileslice():
                 slicers_list = []
                 for i in range(n_dim):
                     slicers_list.append(_slices_for_len(shape[i]))
-                    print("Here", n_dim, i, slicers_list)
                     for sliceobj in product(*slicers_list):
                         _check_slicer(sliceobj, arr, fobj, offset, order)
     # Try some Nones and Ellipses

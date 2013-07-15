@@ -313,16 +313,12 @@ def _analyze_slice(slicer, dim_len, all_full, is_slowest, stride,
     post_slice : slice object
         slice to be applied after array has been read.  Applies any
         transformations in `slicer` that have not been applied in `to_read`
-    typestr : {'full', 'contiguous', None}
-        whether data as read (after applying `to_read` slicing) is full (full
-        axis has been read); contiguous (full axis has not been read, but step
-        in (1, -1)), or neither
 
     Notes
     -----
     This is the heart of the algorithm for making segments from slice objects.
 
-    A continuous slice is a slice with ``slice.step in (1, -1)``
+    A contiguous slice is a slice with ``slice.step in (1, -1)``
 
     A full slice is a continuous slice returning all elements.
 
@@ -343,21 +339,19 @@ def _analyze_slice(slicer, dim_len, all_full, is_slowest, stride,
     except TypeError: # slice
         # Deal with full cases first
         if slicer == slice(None):
-            return slicer, slicer, 'full'
+            return slicer, slicer
         slicer = fill_slicer(slicer, dim_len)
         # actually equivalent to slice(None)
         if slicer == slice(0, dim_len, 1):
-            return slice(None), slice(None), 'full'
+            return slice(None), slice(None)
         # full, but reversed
         if slicer == slice(dim_len-1, None, -1):
-            return slice(None), slice(None, None, -1), 'full'
+            return slice(None), slice(None, None, -1)
         # Not full, mabye continuous
-        typestr = 'contiguous' if slicer.step in (1, -1) else None
         is_int = False
     else: # int
         if slicer < 0: # make negative offsets positive
             slicer = dim_len + slicer
-        typestr = None
         is_int = True
     if all_full:
         action = heuristic(slicer, dim_len, stride)
@@ -372,20 +366,21 @@ def _analyze_slice(slicer, dim_len, all_full, is_slowest, stride,
         if is_slowest and action == 'full':
             action = None if is_int else 'contiguous'
         if action == 'full':
-            return slice(None), slicer, 'full'
-        elif action == 'contiguous':
+            return slice(None), slicer
+        elif action == 'contiguous': # Cannot be int
             # If this is already contiguous, default None behavior handles it
-            if typestr != 'contiguous':
-                step = slicer.step
+            step = slicer.step
+            if not step in (-1, 1):
                 if step < 0:
                     slicer = _positive_slice(slicer)
                 return (slice(slicer.start, slicer.stop, 1),
-                        slice(None, None, step),
-                        'contiguous')
+                        slice(None, None, step))
     # We only need to be positive
-    if is_int or slicer.step > 0:
-        return slicer, slice(None), typestr
-    return _positive_slice(slicer), slice(None, None, -1), typestr
+    if is_int:
+        return slicer, 'dropped'
+    if slicer.step > 0:
+        return slicer, slice(None)
+    return _positive_slice(slicer), slice(None, None, -1)
 
 
 def _get_segments(sliceobj, in_shape, itemsize, offset, order,
@@ -444,13 +439,21 @@ def _get_segments(sliceobj, in_shape, itemsize, offset, order,
         real_no += 1
         is_last = real_no == len(in_shape)
         # make modified sliceobj (to_read, post_slice)
-        to_read_slicer, post_slice_slicer, typestr = _analyze_slice(
+        to_read_slicer, post_slice_slicer = _analyze_slice(
             slicer, dim_len, all_full, is_last, stride, heuristic)
         read_is_int = isinstance(to_read_slicer, int)
-        if not read_is_int: # slicer is (now) a slice
+        if read_is_int: # slicer is (now) a slice
+            typestr = None
+        else:
             # make slice full (it will always be positive)
             to_read_slicer = fill_slicer(to_read_slicer, dim_len)
             slice_len = _full_slicer_len(to_read_slicer)
+            if to_read_slicer == slice(0, dim_len, 1):
+                typestr = 'full'
+            elif to_read_slicer.step == 1:
+                typestr = 'contiguous'
+            else:
+                typestr = None
             # Add this non-zero output dimension to out_shape
             out_shape.append(slice_len)
             # Add any new slicing to post_slice_slicer

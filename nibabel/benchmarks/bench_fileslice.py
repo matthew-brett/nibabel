@@ -29,6 +29,7 @@ ROW_NAMES = ['axis {0}, len {1}'.format(i, SHAPE[i])
              for i in range(len(SHAPE))]
 COL_NAMES = ['mid int',
              'step 1',
+             'half step 1',
              'step mid int']
 
 
@@ -37,6 +38,7 @@ def _slices_for_len(L):
     return (
         L // 2,
         slice(None, None, 1),
+        slice(None, L // 2, 1),
         slice(None, None, L // 2))
 
 

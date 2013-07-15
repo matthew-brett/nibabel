@@ -486,7 +486,7 @@ def test__read_segments():
     # Error conditions
     assert_raises(ValueError, _read_segments, fobj, [], 1)
     assert_raises(ValueError, _read_segments, fobj, [(0, 200)], 199)
-    assert_raises(ValueError, _read_segments, fobj, [(0, 100), (100, 200)], 199)
+    assert_raises(Exception, _read_segments, fobj, [(0, 100), (100, 200)], 199)
 
 
 def test_fileslice():

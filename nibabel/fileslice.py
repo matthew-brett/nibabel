@@ -3,15 +3,15 @@
 from __future__ import division
 
 import operator
-import ctypes
+from mmap import mmap
 
 from .externals.six.moves import reduce
 
 import numpy as np
 
 
-# Threshold for memory gap beyond which we always skip, to save memory
-SKIP_THRESH = 2 ** 11
+# Threshold for memory gap above which we always skip, to save memory
+SKIP_THRESH = 2 ** 8
 
 
 def is_fancy(sliceobj):
@@ -499,8 +499,8 @@ def _read_segments(fileobj, segments, n_bytes):
     Returns
     -------
     buffer : buffer object
-        object implementing buffer protocol.  Can by byte string or ndarray or
-        ctypes ``c_char_array``
+        object implementing buffer protocol, such as byte string or ndarray or
+        mmap or ctypes ``c_char_array``
     """
     if len(segments) == 0:
         if n_bytes != 0:
@@ -514,16 +514,12 @@ def _read_segments(fileobj, segments, n_bytes):
             raise ValueError("Whoops, not enough data in file")
         return bytes
     # More than one segment
-    bytes = ctypes.create_string_buffer(n_bytes)
-    bytes_offset = 0
+    bytes = mmap(-1, n_bytes)
     for offset, length in segments:
         fileobj.seek(offset)
-        these_bytes = fileobj.read(length)
-        bytes_next = bytes_offset + length
-        bytes[bytes_offset:bytes_next] = these_bytes
-        bytes_offset = bytes_next
-    if bytes_offset != n_bytes:
-        raise ValueError("Whoops, n_bytes does not look right")
+        bytes.write(fileobj.read(length))
+    if bytes.tell() != n_bytes:
+        raise ValueError("Oh dear, n_bytes does not look right")
     return bytes
 
 

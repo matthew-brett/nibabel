@@ -455,7 +455,6 @@ def _get_segments(sliceobj, in_shape, itemsize, offset, order,
             out_shape.append(slice_len)
             # Add any new slicing to post_slice_slicer
             new_slicing.append(post_slice_slicer)
-        # print "Here again", slicer, to_read_slicer, typestr
         if all_full and typestr in ('full', 'contiguous'):
             if to_read_slicer.start != 0:
                 all_segments[0][0] += stride * to_read_slicer.start

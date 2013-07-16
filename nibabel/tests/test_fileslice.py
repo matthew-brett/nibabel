@@ -2,13 +2,15 @@
 
 from io import BytesIO
 from itertools import product
+from functools import partial
 
 import numpy as np
 
 from ..fileslice import (is_fancy, canonical_slicers, fileslice,
                          predict_shape, _read_segments, _positive_slice,
                          _space_heuristic, _analyze_slice, slice2len,
-                         fill_slicer, _get_segments)
+                         fill_slicer, _optimize_read_slicers, _slicers2segments,
+                         _get_segments)
 
 from nose.tools import assert_true, assert_false, assert_equal, assert_raises
 
@@ -369,8 +371,114 @@ def test__analyze_slice():
         (0, 'dropped'))
 
 
+def test__optimize_read_slicers():
+    # Test function to optimize read slicers
+    assert_equal(_optimize_read_slicers((1,), (10,), 4, _never),
+                 ((1,), ()))
+    assert_equal(_optimize_read_slicers((slice(None),), (10,), 4, _never),
+                 ((slice(None),), (slice(None),)))
+    assert_equal(_optimize_read_slicers((slice(9),), (10,), 4, _never),
+                 ((slice(0, 9, 1),), (slice(None),)))
+    # optimize cannot update a continuous to a full if last
+    assert_equal(_optimize_read_slicers((slice(9),), (10,), 4, _always),
+                 ((slice(0, 9, 1),), (slice(None),)))
+    # optimize can update non-contiguous to continuous even if last
+    # not optimizing
+    assert_equal(_optimize_read_slicers((slice(0, 9, 2),), (10,), 4, _never),
+                 ((slice(0, 9, 2),), (slice(None),)))
+    # optimizing
+    assert_equal(_optimize_read_slicers((slice(0, 9, 2),), (10,), 4, _always),
+                 ((slice(0, 9, 1),), (slice(None, None, 2),)))
+    # Optimize does nothing for integer when last
+    assert_equal(_optimize_read_slicers((1,), (10,), 4, _always),
+                 ((1,), ()))
+    # 2D
+    assert_equal(_optimize_read_slicers(
+        (slice(None), slice(None)), (10, 6), 4, _never),
+        ((slice(None), slice(None)), (slice(None), slice(None))))
+    assert_equal(_optimize_read_slicers((slice(None), 1), (10, 6), 4, _never),
+                 ((slice(None), 1), (slice(None),)))
+    assert_equal(_optimize_read_slicers((1, slice(None)), (10, 6), 4, _never),
+                 ((1, slice(None)), (slice(None),)))
+    # Not optimizing a partial slice
+    assert_equal(_optimize_read_slicers(
+        (slice(9), slice(None)), (10, 6), 4, _never),
+        ((slice(0, 9, 1), slice(None)), (slice(None), slice(None))))
+    # Optimizing a partial slice
+    assert_equal(_optimize_read_slicers(
+        (slice(9), slice(None)), (10, 6), 4, _always),
+        ((slice(None), slice(None)), (slice(0, 9, 1), slice(None))))
+    # Optimize cannot update a continuous to a full if last
+    assert_equal(_optimize_read_slicers(
+        (slice(None), slice(5)), (10, 6), 4, _always),
+        ((slice(None), slice(0, 5, 1)), (slice(None), slice(None))))
+    # optimize can update non-contiguous to full if not last
+    # not optimizing
+    assert_equal(_optimize_read_slicers(
+        (slice(0, 9, 3), slice(None)), (10, 6), 4, _never),
+        ((slice(0, 9, 3), slice(None)), (slice(None), slice(None))))
+    # optimizing full
+    assert_equal(_optimize_read_slicers(
+        (slice(0, 9, 3), slice(None)), (10, 6), 4, _always),
+        ((slice(None), slice(None)), (slice(0, 9, 3), slice(None))))
+    # optimizing partial
+    assert_equal(_optimize_read_slicers(
+        (slice(0, 9, 3), slice(None)), (10, 6), 4, _partial),
+        ((slice(0, 9, 1), slice(None)), (slice(None, None, 3), slice(None))))
+    # optimize can update non-contiguous to continuous even if last
+    # not optimizing
+    assert_equal(_optimize_read_slicers(
+        (slice(None), slice(0, 5, 2)), (10, 6), 4, _never),
+        ((slice(None), slice(0, 5, 2)), (slice(None), slice(None))))
+    # optimizing
+    assert_equal(_optimize_read_slicers(
+        (slice(None), slice(0, 5, 2),), (10, 6), 4, _always),
+        ((slice(None), slice(0, 5, 1)), (slice(None), slice(None, None, 2))))
+    # Optimize does nothing for integer when last
+    assert_equal(_optimize_read_slicers(
+        (slice(None), 1), (10, 6), 4, _always),
+        ((slice(None), 1), (slice(None),)))
+    # Check gap threshold with 3D
+    _depends0 = partial(_space_heuristic, skip_thresh=10 * 4 - 1)
+    _depends1 = partial(_space_heuristic, skip_thresh=10 * 4)
+    assert_equal(_optimize_read_slicers(
+        (slice(9), slice(None), slice(None)), (10, 6, 2), 4, _depends0),
+        ((slice(None), slice(None), slice(None)),
+          (slice(0, 9, 1), slice(None), slice(None))))
+    assert_equal(_optimize_read_slicers(
+        (slice(None), slice(5), slice(None)), (10, 6, 2), 4, _depends0),
+        ((slice(None), slice(0, 5, 1), slice(None)),
+          (slice(None), slice(None), slice(None))))
+    assert_equal(_optimize_read_slicers(
+        (slice(None), slice(5), slice(None)), (10, 6, 2), 4, _depends1),
+        ((slice(None), slice(None), slice(None)),
+          (slice(None), slice(0, 5, 1), slice(None))))
+
+
+def test__slicers2segments():
+    # Test function to construct segments from slice objects
+    assert_equal(_slicers2segments((0,), (10,), 7, 4),
+                 [[7, 4]])
+    assert_equal(_slicers2segments((0, 1), (10, 6), 7, 4),
+                 [[7 + 10 * 4, 4]])
+    assert_equal(_slicers2segments((0, 1, 2), (10, 6, 4), 7, 4),
+                 [[7 + 10 * 4 + 10 * 6 * 2 * 4, 4]])
+    assert_equal(_slicers2segments((slice(None),), (10,), 7, 4),
+                 [[7, 10 * 4]])
+    assert_equal(_slicers2segments((0, slice(None)), (10, 6), 7, 4),
+                 [[7 + 10*4*i, 4] for i in range(6)])
+    assert_equal(_slicers2segments((slice(None), 0), (10, 6), 7, 4),
+                 [[7, 10 * 4]])
+    assert_equal(_slicers2segments((slice(None), slice(None)), (10, 6), 7, 4),
+                 [[7, 10 * 6 * 4]])
+    assert_equal(_slicers2segments(
+        (slice(None), slice(None), 2), (10, 6, 4), 7, 4),
+        [[7 + 10 * 6 * 2 * 4, 10 * 6 * 4]])
+
+
 def test__get_segments():
-    # Check get_segments routine.  This thing is huge and a bear to test
+    # Check get_segments routine.  The tests aren't well organized because I
+    # wrote them after the code.  We live and (fail to) learn
     segments, out_shape, new_slicing = _get_segments(
         (1,), (10,), 4, 7, 'F', _never)
     assert_equal(segments, [[11, 4]])

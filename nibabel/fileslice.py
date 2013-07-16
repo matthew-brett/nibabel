@@ -312,7 +312,9 @@ def _analyze_slice(slicer, dim_len, all_full, is_slowest, stride,
         file)
     post_slice : slice object
         slice to be applied after array has been read.  Applies any
-        transformations in `slicer` that have not been applied in `to_read`
+        transformations in `slicer` that have not been applied in `to_read`. If
+        axis will be dropped by `to_read` slicing, so no slicing would make
+        sense, return string ``dropped``
 
     Notes
     -----
@@ -384,7 +386,7 @@ def _analyze_slice(slicer, dim_len, all_full, is_slowest, stride,
 
 
 def _get_segments(sliceobj, in_shape, itemsize, offset, order,
-                 heuristic=_space_heuristic):
+                  heuristic=_space_heuristic):
     """ Get segments, output shape, added slicing from `sliceobj`, memory info
 
     Parameters
@@ -409,7 +411,7 @@ def _get_segments(sliceobj, in_shape, itemsize, offset, order,
     segments : list
         list of 2 element lists where lists are (offset, length), giving
         absolute memory offset in bytes and number of bytes to read
-    out_shape : tuple
+    read_shape : tuple
         shape with which to interpret memory as read from `segments`
     new_slicing : tuple
         Any new slicing to be applied to the array after reading.  In terms of
@@ -422,67 +424,136 @@ def _get_segments(sliceobj, in_shape, itemsize, offset, order,
     if order == 'C':
         sliceobj = sliceobj[::-1]
         in_shape = in_shape[::-1]
-    # Analyze sliceobj; compile out shape; compile new slicing
-    all_full = True
-    out_shape = []
-    all_segments = [[offset, itemsize]]
-    new_slicing = []
+    # Analyze sliceobj for new read_slicers and fixup post_slicers
+    # read_slicers are the virtual slices; we don't slice with these, but use
+    # the slice definitions to read the relevant memory from disk
+    read_slicers, post_slicers = _optimize_read_slicers(
+        sliceobj, in_shape, itemsize, heuristic)
+    # work out segments corresponding to read_slicers
+    segments = _slicers2segments(read_slicers, in_shape, offset, itemsize)
+    if all(s == slice(None) for s in post_slicers):
+        post_slicers = []
+    read_shape = predict_shape(read_slicers, in_shape)
+    # If reordered, order shape, post_slicers
+    if order == 'C':
+        read_shape = read_shape[::-1]
+        post_slicers = post_slicers[::-1]
+    return list(segments), tuple(read_shape), tuple(post_slicers)
+
+
+def _optimize_read_slicers(sliceobj, in_shape, itemsize, heuristic):
+    """ Calculates slices to read from disk, and apply after reading
+
+    Parameters
+    ----------
+    sliceobj : object
+        soomething that can be used to slice an array as in ``arr[sliceobj]``.
+        Can be assumed to be canonical in the sense of ``canonical_slicers``
+    in_shape : sequence
+        shape of underlying array to be sliced.  Array for `in_shape` assumed to
+        be already in 'F' order. Reorder 'C' array data before using this
+        routine.
+    itemsize : int
+        element size in array (bytes)
+    heuristic : callable, optional
+        function taking slice object, dim_len, stride length as arguments,
+        returning one of 'full', 'contiguous', None.  See
+        ``_analyze_slice``.
+
+    Returns
+    -------
+    read_slicers : tuple
+        `sliceobj` maybe rephrased to fill out dimensions that are better read
+        from disk and then trimmed to their original size with `post_slicers`.
+        `read_slicers` implies a block of memory to be read from disk. The
+        actual disk positions come from `_slicers2segments` run over
+        `read_slicers`. Includes any ``newaxis`` dimensions in `sliceobj`
+    post_slicers : tuple
+        Any new slicing to be applied to the read array after reading, given in
+        terms of `read_shape`.  Include any ``newaxis`` dimension added by
+        `sliceobj`
+    """
+    read_slicers = []
+    post_slicers = []
     real_no = 0
     stride = itemsize
+    all_full = True
     for slicer in sliceobj:
         if slicer is None:
-            out_shape.append(1)
-            new_slicing.append(slice(None))
+            read_slicers.append(None)
+            post_slicers.append(slice(None))
             continue
-        # int or slice
         dim_len = in_shape[real_no]
         real_no += 1
         is_last = real_no == len(in_shape)
         # make modified sliceobj (to_read, post_slice)
-        to_read_slicer, post_slice_slicer = _analyze_slice(
+        read_slicer, post_slicer = _analyze_slice(
             slicer, dim_len, all_full, is_last, stride, heuristic)
-        read_is_int = isinstance(to_read_slicer, int)
-        if read_is_int: # slicer is (now) a slice
-            typestr = None
-        else:
+        read_slicers.append(read_slicer)
+        all_full = all_full and read_slicer == slice(None)
+        if not isinstance(read_slicer, int):
+            post_slicers.append(post_slicer)
+        stride *= dim_len
+    return tuple(read_slicers), tuple(post_slicers)
+
+
+def _slicers2segments(read_slicers, in_shape, offset, itemsize):
+    """ Get segments from slicers given input shape and memory steps
+
+    Parameters
+    ----------
+    read_slicers : object
+        soomething that can be used to slice an array as in ``arr[sliceobj]``
+        Slice objects can by be assumed canonical as in ``canonical_slicers``,
+        and positive as in ``_positive_slice``
+    in_shape : sequence
+        shape of underlying array on disk before reading
+    offset : int
+        offset of array data in underlying file or memory buffer
+    itemsize : int
+        element size in array (in bytes)
+
+    Returns
+    -------
+    segments : list
+        list of 2 element lists where lists are (offset, length), giving
+        absolute memory offset in bytes and number of bytes to read
+    """
+    all_full = True
+    all_segments = [[offset, itemsize]]
+    stride = itemsize
+    real_no = 0
+    for read_slicer in read_slicers:
+        if read_slicer is None:
+            continue
+        dim_len = in_shape[real_no]
+        real_no += 1
+        is_int = isinstance(read_slicer, int)
+        if not is_int: # slicer is (now) a slice
             # make slice full (it will always be positive)
-            to_read_slicer = fill_slicer(to_read_slicer, dim_len)
-            slice_len = _full_slicer_len(to_read_slicer)
-            if to_read_slicer == slice(0, dim_len, 1):
-                typestr = 'full'
-            elif to_read_slicer.step == 1:
-                typestr = 'contiguous'
-            else:
-                typestr = None
-            # Add this non-zero output dimension to out_shape
-            out_shape.append(slice_len)
-            # Add any new slicing to post_slice_slicer
-            new_slicing.append(post_slice_slicer)
-        if all_full and typestr in ('full', 'contiguous'):
-            if to_read_slicer.start != 0:
-                all_segments[0][0] += stride * to_read_slicer.start
+            read_slicer = fill_slicer(read_slicer, dim_len)
+            slice_len = _full_slicer_len(read_slicer)
+        is_full = read_slicer == slice(0, dim_len, 1)
+        is_contiguous = not is_int and read_slicer.step == 1
+        if all_full and is_contiguous: # full or contiguous
+            if read_slicer.start != 0:
+                all_segments[0][0] += stride * read_slicer.start
             all_segments[0][1] *= slice_len
         else: # Previous or current stuff is not contiguous
-            if read_is_int:
+            if is_int:
                 for segment in all_segments:
-                    segment[0] += stride * slicer
+                    segment[0] += stride * read_slicer
             else: # slice object
                 segments = all_segments
                 all_segments = []
-                for i in range(to_read_slicer.start,
-                               to_read_slicer.stop,
-                               to_read_slicer.step):
+                for i in range(read_slicer.start,
+                               read_slicer.stop,
+                               read_slicer.step):
                     for s in segments:
                         all_segments.append([s[0] + stride * i, s[1]])
-        all_full = all_full and typestr == 'full'
+        all_full = all_full and is_full
         stride *= dim_len
-    if all(s == slice(None) for s in new_slicing):
-        new_slicing = []
-    # If reordered, order shape, new_slicing
-    if order == 'C':
-        out_shape = out_shape[::-1]
-        new_slicing = new_slicing[::-1]
-    return all_segments, tuple(out_shape), tuple(new_slicing)
+    return all_segments
 
 
 def _read_segments(fileobj, segments, n_bytes):

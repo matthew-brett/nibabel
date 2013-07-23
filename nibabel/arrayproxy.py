@@ -12,40 +12,41 @@ The API is - at minimum:
 
 * The object has an attribute ``shape``
 * that the object returns the data array from ``np.asarray(obj)``
-* that modifying no object outside ``obj`` will affect the result of
+* that no changes to any object outside ``obj`` will affect the result of
   ``np.asarray(obj)``.  Specifically, if you pass a header into the the
   __init__, then modifying the original header will not affect the result of the
   array return.
 """
 
-from .volumeutils import BinOpener
+from .volumeutils import BinOpener, array_from_file, apply_read_scaling
 
 
 class ArrayProxy(object):
     """
-    The array proxy allows us to freeze the passed fileobj and header such that
-    it returns the expected data array.
+    The array proxy stores the passed fileobj and relevant header information so
+    that the proxy can return the expected data array.
 
     This fairly generic implementation allows us to deal with Analyze and its
     variants, including Nifti1, and with the MGH format, apparently.
 
     It requires a ``header`` object with methods:
-    * copy
     * get_data_shape
-    * data_from_fileobj
+    * get_data_dtype
+    * get_slope_inter
+    * get_data_offset
 
     Other image types might need to implement their own implementation of this
     API.  See :mod:`minc` for an example.
     """
     def __init__(self, file_like, header):
         self.file_like = file_like
-        self.header = header.copy()
+        self.dtype = header.get_data_dtype()
+        self.shape = header.get_data_shape()
+        self.offset = header.get_data_offset()
+        slope, inter = header.get_slope_inter()
+        self.slope = 1.0 if slope is None else slope
+        self.inter = 0.0 if inter is None else inter
         self._data = None
-        self._shape = header.get_data_shape()
-
-    @property
-    def shape(self):
-        return self._shape
 
     def __array__(self):
         ''' Cached read of data from file '''
@@ -55,5 +56,9 @@ class ArrayProxy(object):
 
     def _read_data(self):
         with BinOpener(self.file_like) as fileobj:
-            data = self.header.data_from_fileobj(fileobj)
+            data = array_from_file(self.shape,
+                                   self.dtype,
+                                   fileobj,
+                                   self.offset)
+            data = apply_read_scaling(data, self.slope, self.inter)
         return data

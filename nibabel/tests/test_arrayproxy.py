@@ -24,33 +24,39 @@ from nose.tools import (assert_true, assert_false, assert_equal,
 
 
 class FunkyHeader(object):
-    def __init__(self, shape):
+    """ Minimal API for ArrayProxy """
+    def __init__(self, shape, dtype):
         self.shape = shape
-
-    def copy(self):
-        return self.__class__(self.shape[:])
+        self.dtype = dtype
 
     def get_data_shape(self):
         return self.shape[:]
 
-    def data_from_fileobj(self, fileobj):
-        return np.arange(np.prod(self.shape)).reshape(self.shape)
+    def get_data_dtype(self):
+        return self.dtype
+
+    def get_slope_inter(self):
+        return 1, 0
+
+    def get_data_offset(self):
+        return 0
 
 
 def test_init():
-    bio = BytesIO()
     shape = [2,3,4]
-    hdr = FunkyHeader(shape)
+    dtype = np.dtype(np.int16)
+    arr = np.arange(24, dtype=dtype).reshape((2,3,4))
+    bio = BytesIO()
+    bio.write(arr.tostring(order='F'))
+    hdr = FunkyHeader(shape, dtype)
     ap = ArrayProxy(bio, hdr)
     assert_true(ap.file_like is bio)
     assert_equal(ap.shape, shape)
-    # shape should be read only
-    assert_raises(AttributeError, setattr, ap, 'shape', shape)
-    # Check there has been a copy of the header
-    assert_false(ap.header is hdr)
-    # Check we can modify the original header without changing the ap version
-    hdr.shape[0] = 6
-    assert_not_equal(ap.shape, shape)
+    # Check there has been a copy of the header information
+    hdr.shape = [4, 3, 2]
+    hdr.dtype = np.dtype(np.int32)
+    assert_equal(ap.shape, shape) # shape not changed
+    assert_equal(ap.dtype, dtype) # dtype not changed
     # Get the data
     assert_array_equal(np.asarray(ap), np.arange(24).reshape((2,3,4)))
 
@@ -63,17 +69,22 @@ def write_raw_data(arr, hdr, fileobj):
 
 
 def test_nifti1_init():
+    # Check a nifti1 header works as expected
     bio = BytesIO()
     shape = (2,3,4)
+    dtype = np.dtype(np.int16)
     hdr = Nifti1Header()
-    arr = np.arange(24, dtype=np.int16).reshape(shape)
+    arr = np.arange(24, dtype=dtype).reshape(shape)
     write_raw_data(arr, hdr, bio)
     hdr.set_slope_inter(2, 10)
     ap = ArrayProxy(bio, hdr)
     assert_true(ap.file_like == bio)
     assert_equal(ap.shape, shape)
-    # Check there has been a copy of the header
-    assert_false(ap.header is hdr)
+    # Modifying the header had no effect on the proxy
+    hdr.set_data_shape([4, 3, 2])
+    hdr.set_data_dtype(np.int32)
+    assert_equal(ap.shape, shape) # shape not changed
+    assert_equal(ap.dtype, dtype) # dtype not changed
     # Get the data
     assert_array_equal(np.asarray(ap), arr * 2.0 + 10)
     with InTemporaryDirectory():

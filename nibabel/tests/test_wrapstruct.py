@@ -107,6 +107,10 @@ class _TestWrapStructBase(TestCase):
     '''
     header_class = None
 
+    # Value for the binaryblock that will raise an error on checks. None means
+    # do not check
+    bb_bad = None
+
     def test_general_init(self):
         hdr = self.header_class()
         # binaryblock has length given by header data dtype
@@ -269,12 +273,12 @@ class _TestWrapStructBase(TestCase):
                       self.header_class,
                       bb + b'\x00')
         # Checking set to true by default, and prevents nonsense being
-        # set into the header. Completely zeros binary block always
-        # (fairly) bad
-        bb_bad = b'\x00' * len(bb)
-        assert_raises(HeaderDataError, self.header_class, bb_bad)
+        # set into the header.
+        if self.bb_bad is None:
+            return
+        assert_raises(HeaderDataError, self.header_class, self.bb_bad)
         # now slips past without check
-        _ = self.header_class(bb_bad, check=False)
+        _ = self.header_class(self.bb_bad, check=False)
 
     def test_as_byteswapped(self):
         # Check byte swapping
@@ -291,7 +295,7 @@ class _TestWrapStructBase(TestCase):
         class DC(self.header_class):
             def check_fix(self, *args, **kwargs):
                 raise Exception
-        assert_raises(Exception, DC, hdr.binaryblock)
+        assert_raises(Exception, DC, hdr.binaryblock, check=True)
         hdr = DC(hdr.binaryblock, check=False)
         hdr2 = hdr.as_byteswapped(native_code)
         hdr_bs = hdr.as_byteswapped(swapped_code)
@@ -306,6 +310,15 @@ class _TestWrapStructBase(TestCase):
         binblock = hdr.binaryblock
         return self.header_class.diagnose_binaryblock(binblock)
 
+    def test_str(self):
+        hdr = self.header_class()
+        # Check something returns from str
+        s1 = str(hdr)
+        assert_true(len(s1) > 0)
+
+
+class ValueLabelMixin(object):
+    """ Mixin class to test automatic value label recoding """
     def test_get_value_label(self):
         hdr = self.header_class()
         original_recoders = hdr._field_recoders
@@ -332,16 +345,14 @@ class _TestWrapStructBase(TestCase):
                 hdr._field_recoders[key] = rec
                 assert_equal(hdr.get_value_label(key), 'fullness of heart')
 
-    def test_str(self):
-        hdr = self.header_class()
-        # Check something returns from str
-        s1 = str(hdr)
-        assert_true(len(s1) > 0)
 
-
-class TestWrapStruct(_TestWrapStructBase):
+class TestWrapStruct(_TestWrapStructBase, ValueLabelMixin):
     """ Test fake binary header defined at top of module """
     header_class = MyWrapStruct
+
+    # A value for the binary block that should raise an error
+    # Completely zeros binary block (nearly) always (fairly) bad
+    bb_bad = b'\x00' * header_class.template_dtype.itemsize
 
     def _set_something_into_hdr(self, hdr):
         # Called from test_bytes test method.  Specific to the header data type
@@ -362,6 +373,15 @@ class TestWrapStruct(_TestWrapStructBase):
         hdr._field_recoders['an_integer'] = rec
         s2 = str(hdr)
         assert_true('fullness of heart' in s2)
+
+    def test_copy(self):
+        hdr = self.header_class()
+        hdr2 = hdr.copy()
+        assert_equal(hdr, hdr2)
+        self._set_something_into_hdr(hdr)
+        assert_not_equal(hdr, hdr2)
+        self._set_something_into_hdr(hdr2)
+        assert_equal(hdr, hdr2)
 
     def test_checks(self):
         # Test header checks

@@ -34,7 +34,7 @@ from numpy.testing import (assert_array_equal,
 from ..testing import (assert_equal, assert_not_equal, assert_true,
                        assert_false, assert_raises, data_path)
 
-from .test_wrapstruct import _TestWrapStructBase
+from .test_wrapstruct import _TestWrapStructBase, ValueLabelMixin
 from . import test_spatialimages as tsi
 
 header_file = os.path.join(data_path, 'analyze.hdr')
@@ -48,9 +48,13 @@ def _write_data(hdr, data, fileobj):
     array_to_file(data, fileobj, out_dtype, offset)
 
 
-class TestAnalyzeHeader(_TestWrapStructBase):
+class TestAnalyzeHeader(_TestWrapStructBase, ValueLabelMixin):
     header_class = AnalyzeHeader
     example_file = header_file
+
+    # A value for the binary block that should raise an error
+    # Completely zeros binary block (nearly) always (fairly) bad
+    bb_bad = b'\x00' * header_class.template_dtype.itemsize
 
     def test_general_init(self):
         super(TestAnalyzeHeader, self).test_general_init()

@@ -35,7 +35,8 @@ The fundamental task of DICOM is to allow different computers to send messages
 to one another.  These messages can contain data, and the data is very often
 medical images.
 
-The messages are in the form of requests for an operation, or responses to those requests.
+The messages are in the form of requests for an operation, or responses to those
+requests.
 
 Let's call the requests and the responses - services.
 
@@ -61,7 +62,8 @@ consisting of DICOM elements (see below).
 Here we will cover:
 
 * what DICOM elements are;
-* how DICOM elements are arranged to form complicated data structures such as images;
+* how DICOM elements are arranged to form complicated data structures such as
+  images;
 * how the service part and the data part go together to form whole messages
 * how these parts relate to DICOM files.
 
@@ -71,49 +73,49 @@ The DICOM standard
 
 The documents defining the standard are:
 
-+-------------+------------------------------------------------------------------+
-| Number      | Name                                                             |
-+=============+==================================================================+
-| `PS 3.1`_   | Introduction and Overview                                        |
-+-------------+------------------------------------------------------------------+
-| `PS 3.2`_   | Conformance                                                      |
-+-------------+------------------------------------------------------------------+
-| `PS 3.3`_   | Information Object Definitions                                   |
-+-------------+------------------------------------------------------------------+
-| `PS 3.4`_   | Service Class Specifications                                     |
-+-------------+------------------------------------------------------------------+
-| `PS 3.5`_   | Data Structure and Encoding                                      |
-+-------------+------------------------------------------------------------------+
-| `PS 3.6`_   | Data Dictionary                                                  |
-+-------------+------------------------------------------------------------------+
-| `PS 3.7`_   | Message Exchange                                                 |
-+-------------+------------------------------------------------------------------+
-| `PS 3.8`_   | Network Communication Support for Message Exchange               |
-+-------------+------------------------------------------------------------------+
-| PS 3.9      | Retired                                                          |
-+-------------+------------------------------------------------------------------+
-| `PS 3.10`_  | Media Storage / File Format for Media Interchange                |
-+-------------+------------------------------------------------------------------+
-| `PS 3.11`_  | Media Storage Application Profiles                               |
-+-------------+------------------------------------------------------------------+
-| `PS 3.12`_  | Media Formats / Physical Media for Media Interchange             |
-+-------------+------------------------------------------------------------------+
-| PS 3.13     | Retired                                                          |
-+-------------+------------------------------------------------------------------+
-| `PS 3.14`_  | Grayscale Standard Display Function                              |
-+-------------+------------------------------------------------------------------+
-| `PS 3.15`_  | Security and System Management Profiles                          |
-+-------------+------------------------------------------------------------------+
-| `PS 3.16`_  | Content Mapping Resource                                         |
-+-------------+------------------------------------------------------------------+
-| `PS 3.17`_  | Explanatory Information                                          |
-+-------------+------------------------------------------------------------------+
-| `PS 3.18`_  | Web Access to DICOM Persistent Objects (WADO)                    |
-+-------------+------------------------------------------------------------------+
-| `PS 3.19`_  | Application Hosting                                              |
-+-------------+------------------------------------------------------------------+
-| `PS 3.20`_  | Transformation of DICOM to and from HL7 Standards                |
-+-------------+------------------------------------------------------------------+
++-------------+---------------------------------------------------------+
+| Number      | Name                                                    |
++=============+=========================================================+
+| `PS 3.1`_   | Introduction and Overview                               |
++-------------+---------------------------------------------------------+
+| `PS 3.2`_   | Conformance                                             |
++-------------+---------------------------------------------------------+
+| `PS 3.3`_   | Information Object Definitions                          |
++-------------+---------------------------------------------------------+
+| `PS 3.4`_   | Service Class Specifications                            |
++-------------+---------------------------------------------------------+
+| `PS 3.5`_   | Data Structure and Encoding                             |
++-------------+---------------------------------------------------------+
+| `PS 3.6`_   | Data Dictionary                                         |
++-------------+---------------------------------------------------------+
+| `PS 3.7`_   | Message Exchange                                        |
++-------------+---------------------------------------------------------+
+| `PS 3.8`_   | Network Communication Support for Message Exchange      |
++-------------+---------------------------------------------------------+
+| PS 3.9      | Retired                                                 |
++-------------+---------------------------------------------------------+
+| `PS 3.10`_  | Media Storage / File Format for Media Interchange       |
++-------------+---------------------------------------------------------+
+| `PS 3.11`_  | Media Storage Application Profiles                      |
++-------------+---------------------------------------------------------+
+| `PS 3.12`_  | Media Formats / Physical Media for Media Interchange    |
++-------------+---------------------------------------------------------+
+| PS 3.13     | Retired                                                 |
++-------------+---------------------------------------------------------+
+| `PS 3.14`_  | Grayscale Standard Display Function                     |
++-------------+---------------------------------------------------------+
+| `PS 3.15`_  | Security and System Management Profiles                 |
++-------------+---------------------------------------------------------+
+| `PS 3.16`_  | Content Mapping Resource                                |
++-------------+---------------------------------------------------------+
+| `PS 3.17`_  | Explanatory Information                                 |
++-------------+---------------------------------------------------------+
+| `PS 3.18`_  | Web Access to DICOM Persistent Objects (WADO)           |
++-------------+---------------------------------------------------------+
+| `PS 3.19`_  | Application Hosting                                     |
++-------------+---------------------------------------------------------+
+| `PS 3.20`_  | Transformation of DICOM to and from HL7 Standards       |
++-------------+---------------------------------------------------------+
 
 *****************
 DICOM data format
@@ -253,33 +255,6 @@ Here is the start of the relevant section from PS 3.5:
   the Private group specified by the blocks corresponding Private Creator Data
   Element.
 
-Data dictionaries and Value Multiplicity
-----------------------------------------
-
-The DICOM data dictionary of PS 3.6 section 6 lists the (Attribute tag,
-Attribute name, Attribute Keyword, Value Representation, Value Multiplicity) for
-all standard (even tag group) tags.
-
-For example, here is an excerpt from the table in PS 3.6 section 6:
-
-+-------------+------------------------------------------+-------------------------------------+----+----+
-| Tag         | Name                                     | Keyword                             | VR | VM |
-+=============+==========================================+=====================================+====+====+
-| (0010,0010) | Patient's Name                           | PatientName                         | PN | 1  |
-+-------------+------------------------------------------+-------------------------------------+----+----+
-| (0010,0020) | Patient ID                               | PatientID                           | LO | 1  |
-+-------------+------------------------------------------+-------------------------------------+----+----+
-| (0010,0021) | Issuer of Patient ID                     | IssuerOfPatientID                   | LO | 1  |
-+-------------+------------------------------------------+-------------------------------------+----+----+
-| (0010,0022) | Type of Patient ID                       | TypeOfPatientID                     | CS | 1  |
-+-------------+------------------------------------------+-------------------------------------+----+----+
-| (0010,0024) | Issuer of Patient ID Qualifiers Sequence | IssuerOfPatientIDQualifiersSequence | SQ | 1  |
-+-------------+------------------------------------------+-------------------------------------+----+----+
-| (0010,0030) | Patient's Birth Date                     | PatientBirthDate                    | DA | 1  |
-+-------------+------------------------------------------+-------------------------------------+----+----+
-| (0010,0032) | Patient's Birth Time                     | PatientBirthTime                    | TM | 1  |
-+-------------+------------------------------------------+-------------------------------------+----+----+
-
 Value Representation
 --------------------
 
@@ -385,11 +360,48 @@ Quoting from section 7.1.1 of `PS 3.5`_:
     Value Representation OW or OB Undefined Length may be used depending
     on the negotiated Transfer Syntax (see Section 10 and Annex A).
 
-Value field
+Value Field
 -----------
 
 An even number of bytes storing the the value(s) of the data element.  The exact
-format of this data depends on the Value Representation.
+format of this data depends on the Value Representation and the Value
+Multiplicity (see below).
+
+Data dictionaries and Value Multiplicity
+----------------------------------------
+
+Most Value Representations allow there to be more than one actual value encoded
+in the Value Field.
+
+The range of the number of values is given by the Value Multiplicity (VM)
+
+
+The DICOM data dictionary of PS 3.6 section 6 lists the (Attribute tag,
+Attribute name, Attribute Keyword, Value Representation, Value Multiplicity) for
+all standard (even tag group) tags. Value Representation abbreviates to VR, and
+Value Multiplicity abbreviates to VM.
+
+For example, here is an excerpt from the table in PS 3.6 section 6:
+
++-------------+------------------------------------------+-------------------------------------+----+----+
+| Tag         | Name                                     | Keyword                             | VR | VM |
++=============+==========================================+=====================================+====+====+
+| (0010,0010) | Patient's Name                           | PatientName                         | PN | 1  |
++-------------+------------------------------------------+-------------------------------------+----+----+
+| (0010,0020) | Patient ID                               | PatientID                           | LO | 1  |
++-------------+------------------------------------------+-------------------------------------+----+----+
+| (0010,0021) | Issuer of Patient ID                     | IssuerOfPatientID                   | LO | 1  |
++-------------+------------------------------------------+-------------------------------------+----+----+
+| (0010,0022) | Type of Patient ID                       | TypeOfPatientID                     | CS | 1  |
++-------------+------------------------------------------+-------------------------------------+----+----+
+| (0010,0024) | Issuer of Patient ID Qualifiers Sequence | IssuerOfPatientIDQualifiersSequence | SQ | 1  |
++-------------+------------------------------------------+-------------------------------------+----+----+
+| (0010,0030) | Patient's Birth Date                     | PatientBirthDate                    | DA | 1  |
++-------------+------------------------------------------+-------------------------------------+----+----+
+| (0010,0032) | Patient's Birth Time                     | PatientBirthTime                    | TM | 1  |
++-------------+------------------------------------------+-------------------------------------+----+----+
+
+The name
 
 DICOM data structures
 =====================

@@ -13,7 +13,8 @@ import os
 import numpy as np
 
 from ..openers import Opener
-from ..ecat import EcatHeader, EcatMlist, EcatSubHeader, EcatImage
+from ..ecat import (EcatHeader, EcatMlist, EcatSubHeader, EcatImage,
+                    read_subheaders)
 
 from unittest import TestCase
 
@@ -152,7 +153,8 @@ class TestEcatSubHeader(TestCase):
     fid = open(example_file, 'rb')
     hdr = header_class.from_fileobj(fid)
     mlist =  mlist_class(fid, hdr)
-    subhdr = subhdr_class(hdr, mlist, fid)
+    subhdrs = read_subheaders(fid, mlist._mlist, hdr.endianness)
+    subhdr = subhdr_class(hdr, mlist, subhdrs)
 
     def test_subheader_size(self):
         assert_equal(self.subhdr_class._subhdrdtype.itemsize, 510)
@@ -170,7 +172,7 @@ class TestEcatSubHeader(TestCase):
         assert_equal(self.subhdr._get_data_dtype(0),np.uint16)
         #assert_equal(self.subhdr._get_frame_offset(), 1024)
         assert_equal(self.subhdr._get_frame_offset(), 1536)
-        dat = self.subhdr.raw_data_from_fileobj()
+        dat = self.subhdr.raw_data_from_fileobj(self.fid)
         assert_equal(dat.shape, self.subhdr.get_shape())
         scale_factor = self.subhdr.subheaders[0]['scale_factor']
         assert_equal(self.subhdr.subheaders[0]['scale_factor'].item(),1.0)
@@ -193,7 +195,7 @@ class TestEcatImage(TestCase):
         with InTemporaryDirectory():
             self.img.to_filename(tmp_file)
             other = self.image_class.load(tmp_file)
-            assert_equal(self.img.get_data().all(), other.get_data().all())
+            assert_array_equal(self.img.get_data(), other.get_data())
             # Delete object holding reference to temporary file to make Windows
             # happier.
             del other

@@ -12,6 +12,7 @@ import numpy as np
 
 from .volumeutils import (native_code, swapped_code, make_dt_codes,
                            array_from_file)
+from .openers import Opener
 from .spatialimages import SpatialImage, ImageDataError
 from .arraywriters import make_array_writer
 from .wrapstruct import WrapStruct
@@ -501,7 +502,7 @@ class EcatSubHeader(object):
     _subhdrdtype = subhdr_dtype
     _data_type_codes = data_type_codes
 
-    def __init__(self, hdr, mlist, fileobj):
+    def __init__(self, hdr, mlist, subheaders):
         """parses the subheaders in the ecat (.v) file
         there is one subheader for each frame in the ecat file
 
@@ -512,13 +513,14 @@ class EcatSubHeader(object):
         mlist : EcatMlist
 
         fileobj : ECAT file <filename>.v  fileholder or file object
-                  with read, seek methods
+                with read, seek methods
+        subheaders : sequence
+            sequence of subheader structured arrays
         """
         self._header = hdr
         self.endianness = hdr.endianness
         self._mlist = mlist
-        self.fileobj = fileobj
-        self.subheaders = read_subheaders(fileobj, mlist._mlist, hdr.endianness)
+        self.subheaders = subheaders
 
     def get_shape(self, frame=0):
         """ returns shape of given frame"""
@@ -610,7 +612,7 @@ class EcatSubHeader(object):
 
         return raw_data
 
-    def raw_data_from_fileobj(self, frame=0, orientation=None):
+    def raw_data_from_fileobj(self, fileobj, frame=0, orientation=None):
         '''
         Get raw data from file object.
 
@@ -625,12 +627,11 @@ class EcatSubHeader(object):
             dtype=dtype.newbyteorder(self._header.endianness)
         shape = self.get_shape(frame)
         offset = self._get_frame_offset(frame)
-        fid_obj = self.fileobj
-        raw_data = array_from_file(shape, dtype, fid_obj, offset=offset)
+        raw_data = array_from_file(shape, dtype, fileobj, offset=offset)
         raw_data = self._get_oriented_data(raw_data, orientation)
         return raw_data
 
-    def data_from_fileobj(self, frame=0, orientation=None):
+    def data_from_fileobj(self, fileobj, frame=0, orientation=None):
         '''
         Read scaled data from file for a given frame
 
@@ -642,13 +643,11 @@ class EcatSubHeader(object):
         '''
         header = self._header
         subhdr = self.subheaders[frame]
-        raw_data = self.raw_data_from_fileobj(frame, orientation)
+        raw_data = self.raw_data_from_fileobj(fileobj, frame, orientation)
         # Scale factors have to be set to scalars to force scalar upcasting
         data = raw_data * np.asscalar(header['ecat_calibration_factor'])
         data = data * np.asscalar(subhdr['scale_factor'])
         return data
-
-
 
 
 class EcatImage(SpatialImage):
@@ -668,24 +667,28 @@ class EcatImage(SpatialImage):
         The array proxy allows us to freeze the passed fileobj and
         header such that it returns the expected data array.
         '''
-        def __init__(self, subheader):
-            self._subheader = subheader
+        def __init__(self, file_like, mlist, subheader):
+            self.file_like = file_like
+            self.frame_mapping = get_frame_order(mlist)
             self._data = None
             x, y, z = subheader.get_shape()
             nframes = subheader.get_nframes()
             self.shape = (x, y, z, nframes)
+            self._subheader = subheader
 
         def __array__(self):
             ''' Cached read of data from file
             This reads ALL FRAMES into one array, can be memory expensive
-            use subheader.data_from_fileobj(frame) for less memory intensive
-            reads
+            use subheader.data_from_fileobj(fobj, frame) for less memory
+            intensive reads
             '''
             if self._data is None:
                 self._data = np.empty(self.shape)
-                frame_mapping = self._subheader._mlist.get_frame_order()
-                for i in sorted(frame_mapping):
-                    self._data[:,:,:,i] = self._subheader.data_from_fileobj(frame_mapping[i][0])
+                with Opener(self.file_like) as fileobj:
+                    for i in sorted(self.frame_mapping):
+                        self._data[:,:,:,i] = self._subheader.data_from_fileobj(
+                            fileobj,
+                            self.frame_mapping[i][0])
             return self._data
 
     def __init__(self, data, affine, header,
@@ -779,7 +782,10 @@ class EcatImage(SpatialImage):
         :param orientation: None (default), 'neurological' or 'radiological'
         :rtype: Numpy array containing (possibly oriented) raw data
         '''
-        return self._subheader.data_from_fileobj(frame, orientation)
+        hdr_fh, img_fh = self._get_fileholders(self.file_map)
+        with img_fh.get_prepare_fileobj(mode='rb') as imgf:
+            data = self._subheader.data_from_fileobj(imgf, frame, orientation)
+        return data
 
     def get_data_dtype(self,frame):
         subhdr = self._subheader
@@ -821,27 +827,35 @@ class EcatImage(SpatialImage):
     def from_file_map(klass, file_map):
         """class method to create image from mapping
         specified in file_map"""
-        hdr_file, img_file = klass._get_fileholders(file_map)
         #note header and image are in same file
-        hdr_fid = hdr_file.get_prepare_fileobj(mode = 'rb')
-        header = klass._header.from_fileobj(hdr_fid)
-        hdr_copy = header.copy()
-        ### LOAD MLIST
-        mlist = klass._mlist(hdr_fid, hdr_copy)
-        ### LOAD SUBHEADERS
-        subheaders = klass._subheader(hdr_copy,
-                                      mlist,
-                                      hdr_fid)
-        ### LOAD DATA
+        hdr_fh, img_fh = klass._get_fileholders(file_map)
+        with img_fh.get_prepare_fileobj(mode='rb') as imgf:
+            header = klass.header_class.from_fileobj(imgf)
+            endian = header.endianness
+            hdr_copy = header.copy()
+            ### LOAD MLIST
+            mlist_obj = klass._mlist(imgf, hdr_copy)
+            mlist = mlist_obj._mlist
+            ### LOAD SUBHEADERS
+            subheaders = read_subheaders(imgf, mlist, endian)
+            subhdr_obj = klass._subheader(hdr_copy, mlist_obj, subheaders)
+        ### prepare data
         ##  Class level ImageArrayProxy
-        data = klass.ImageArrayProxy(subheaders)
+        imgf = img_fh.fileobj
+        if imgf is None:
+            imgf = img_fh.filename
+        data = klass.ImageArrayProxy(imgf, mlist, subhdr_obj)
 
         ## Get affine
-        if not subheaders._check_affines():
+        if not subhdr_obj._check_affines():
             warnings.warn('Affines different across frames, loading affine from FIRST frame',
                           UserWarning )
-        aff = subheaders.get_frame_affine()
-        img = klass(data, aff, header, subheaders, mlist, extra=None, file_map = file_map)
+        aff = subhdr_obj.get_frame_affine()
+        img = klass(data, aff, header,
+                    subhdr_obj,
+                    mlist_obj,
+                    extra=None,
+                    file_map = file_map)
         return img
 
     def _get_empty_dir(self):
@@ -874,7 +888,7 @@ class EcatImage(SpatialImage):
     def to_file_map(self, file_map=None):
         ''' Write ECAT7 image to `file_map` or contained ``self.file_map``
 
-        The format consist of:
+        The format consists of:
 
         - A main header (512L) with dictionary entries in the form
             [numAvail, nextDir, previousDir, numUsed]
@@ -914,9 +928,8 @@ class EcatImage(SpatialImage):
             pos = imgf.tell()
             imgf.seek(pos + 2)
 
-            #Get frame and its data type
-            image = self._subheader.raw_data_from_fileobj(index)
-            dtype = image.dtype
+            # Get frame data
+            image = data[..., index]
 
             #Write frame images
             self._write_data(image, imgf, pos+2, endianness='>')

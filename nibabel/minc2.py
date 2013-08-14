@@ -30,7 +30,7 @@ import numpy as np
 from .optpkg import optional_package
 h5py, have_h5py, setup_module = optional_package('h5py')
 
-from .minc import Minc1File, Minc1Image, MincError
+from .minc1 import Minc1File, Minc1Image, MincError
 
 
 class Hdf5Bunch(object):

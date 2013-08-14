@@ -16,8 +16,8 @@ import numpy as np
 
 from .. import load, Nifti1Image
 from ..externals.netcdf import netcdf_file
-from .. import minc
-from ..minc import Minc1File, Minc1Image
+from .. import minc1
+from ..minc1 import Minc1File, Minc1Image
 
 from nose.tools import (assert_true, assert_equal, assert_false, assert_raises)
 from numpy.testing import assert_array_equal, assert_array_almost_equal
@@ -27,8 +27,8 @@ from ..testing import data_path
 from . import test_spatialimages as tsi
 
 def test_old_namespace():
-    # Check old names are defined in minc module and top level
-    from .. minc import MincFile, MincImage
+    # Check old names are defined in minc1 module and top level
+    from ..minc1 import MincFile, MincImage
     assert_true(MincFile is Minc1File)
     assert_true(MincImage is Minc1Image)
     from .. import MincImage, Minc1Image as M1
@@ -36,7 +36,7 @@ def test_old_namespace():
 
 
 class _TestMincFile(object):
-    module = minc
+    module = minc1
     file_class = Minc1File
     opener = netcdf_file
     example_params = dict(

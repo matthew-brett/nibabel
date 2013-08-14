@@ -11,7 +11,7 @@ from .analyze import AnalyzeImage
 from .spm99analyze import Spm99AnalyzeImage
 from .spm2analyze import Spm2AnalyzeImage
 from .nifti1 import Nifti1Pair, Nifti1Image
-from .minc import Minc1Image
+from .minc1 import Minc1Image
 from .freesurfer import MGHImage
 from .volumeutils import Recoder
 

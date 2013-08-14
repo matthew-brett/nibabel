@@ -84,6 +84,7 @@ import sys
 
 import numpy as np
 
+from .openers import Opener
 from .volumeutils import (native_code, swapped_code, make_dt_codes,
                           shape_zoom_affine, array_from_file, seek_tell,
                           apply_read_scaling)
@@ -439,13 +440,14 @@ class AnalyzeHeader(WrapStruct):
         '''
         pass
 
-    def raw_data_from_fileobj(self, fileobj):
-        ''' Read unscaled data array from `fileobj`
+    def raw_data_from_fileobj(self, file_like):
+        ''' Read unscaled data array from `file_like`
 
         Parameters
         ----------
-        fileobj : file-like
-           Must be open, and implement ``read`` and ``seek`` methods
+        file_like : file-like object or str
+           Must be open, and implement ``read`` and ``seek`` methods if a
+           file-like object.
 
         Returns
         -------
@@ -455,20 +457,22 @@ class AnalyzeHeader(WrapStruct):
         dtype = self.get_data_dtype()
         shape = self.get_data_shape()
         offset = self.get_data_offset()
-        return array_from_file(shape, dtype, fileobj, offset)
+        with Opener(file_like, 'rb') as fileobj:
+            return array_from_file(shape, dtype, fileobj, offset)
 
-    def data_from_fileobj(self, fileobj):
-        ''' Read scaled data array from `fileobj`
+    def data_from_fileobj(self, file_like):
+        ''' Read scaled data array from `file_like`
 
         Use this routine to get the scaled image data from an image file
-        `fileobj`, given a header `self`.  "Scaled" means, with any header
+        `file_like`, given a header `self`.  "Scaled" means, with any header
         scaling factors applied to the raw data in the file.  Use
         `raw_data_from_fileobj` to get the raw data.
 
         Parameters
         ----------
-        fileobj : file-like
-           Must be open, and implement ``read`` and ``seek`` methods
+        file_like : file-like object or str
+           Must be open, and implement ``read`` and ``seek`` methods if a
+           file-like object.
 
         Returns
         -------
@@ -483,7 +487,7 @@ class AnalyzeHeader(WrapStruct):
         scaling, such as SPM analyze formats and NIfTI.
         '''
         # read unscaled data
-        data = self.raw_data_from_fileobj(fileobj)
+        data = self.raw_data_from_fileobj(file_like)
         # get scalings from header.  Value of None means not present in header
         slope, inter = self.get_slope_inter()
         slope = 1.0 if slope is None else slope
@@ -491,8 +495,8 @@ class AnalyzeHeader(WrapStruct):
         # Upcast as necessary for big slopes, intercepts
         return apply_read_scaling(data, slope, inter)
 
-    def data_to_fileobj(self, data, fileobj):
-        ''' Write `data` to `fileobj`, maybe modifying `self`
+    def data_to_fileobj(self, data, file_like):
+        ''' Write `data` to `file_like`, maybe modifying `self`
 
         In writing the data, we match the header to the written data, by
         setting the header scaling factors.  Thus we modify `self` in
@@ -502,9 +506,9 @@ class AnalyzeHeader(WrapStruct):
         ----------
         data : array-like
            data to write; should match header defined shape
-        fileobj : file-like object
-           Object with file interface, implementing ``write`` and
-           ``seek``
+        file_like : file-like object or str
+           Must be open, and implement ``write`` and ``seek`` methods if a
+           file-like object.
 
         Examples
         --------
@@ -533,8 +537,9 @@ class AnalyzeHeader(WrapStruct):
         except WriterError:
             msg = sys.exc_info()[1] # python 2 / 3 compatibility
             raise HeaderTypeError(msg)
-        seek_tell(fileobj, self.get_data_offset())
-        arr_writer.to_fileobj(fileobj)
+        with Opener(file_like, 'wb') as fileobj:
+            seek_tell(fileobj, self.get_data_offset())
+            arr_writer.to_fileobj(fileobj)
         self.set_slope_inter(*get_slope_inter(arr_writer))
 
     def get_data_dtype(self):

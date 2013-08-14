@@ -15,6 +15,7 @@ import numpy as np
 import numpy.linalg as npl
 
 from .py3k import asstr
+from .openers import Opener
 from .volumeutils import Recoder, make_dt_codes, endian_codes
 from .spatialimages import HeaderDataError, ImageFileError
 from .batteryrunners import Report
@@ -339,15 +340,16 @@ class Nifti1Extension(object):
     def __ne__(self, other):
         return not self == other
 
-    def write_to(self, fileobj, byteswap):
-        ''' Write header extensions to fileobj
+    def write_to(self, file_like, byteswap):
+        ''' Write header extensions to file-like object or filename
 
-        Write starts at fileobj current file position.
+        Write starts at fileobj current file position if `file_like` is a
+        file-like object.
 
         Parameters
         ----------
-        fileobj : file-like object
-           Should implement ``write`` method
+        fileobj : file-like object or str
+           Should implement ``write`` method or be a file name.
         byteswap : boolean
           Flag if byteswapping the data is required.
 
@@ -355,19 +357,21 @@ class Nifti1Extension(object):
         -------
         None
         '''
-        extstart = fileobj.tell()
-        rawsize = self.get_sizeondisk()
-        # write esize and ecode first
-        extinfo = np.array((rawsize, self._code), dtype=np.int32)
-        if byteswap:
-            extinfo = extinfo.byteswap()
-        fileobj.write(extinfo.tostring())
-        # followed by the actual extension content
-        # XXX if mangling upon load is implemented, it should be reverted here
-        fileobj.write(self._mangle(self._content))
-        # be nice and zero out remaining part of the extension till the
-        # next 16 byte border
-        fileobj.write(b'\x00' * (extstart + rawsize - fileobj.tell()))
+        with Opener(file_like, 'wb') as fileobj:
+            extstart = fileobj.tell()
+            rawsize = self.get_sizeondisk()
+            # write esize and ecode first
+            extinfo = np.array((rawsize, self._code), dtype=np.int32)
+            if byteswap:
+                extinfo = extinfo.byteswap()
+            fileobj.write(extinfo.tostring())
+            # followed by the actual extension content
+            # XXX if mangling upon load is implemented, it should be reverted
+            # here
+            fileobj.write(self._mangle(self._content))
+            # be nice and zero out remaining part of the extension till the next
+            # 16 byte border
+            fileobj.write(b'\x00' * (extstart + rawsize - fileobj.tell()))
 
 
 # NIfTI header extension type codes (ECODE)
@@ -423,15 +427,16 @@ class Nifti1Extensions(list):
     def __cmp__(self, other):
         return cmp(list(self), list(other))
 
-    def write_to(self, fileobj, byteswap):
-        ''' Write header extensions to fileobj
+    def write_to(self, file_like, byteswap):
+        ''' Write header extensions to file-like object or filename
 
-        Write starts at fileobj current file position.
+        Write starts at file current file position if `file_like` is a file-like
+        object.
 
         Parameters
         ----------
-        fileobj : file-like object
-           Should implement ``write`` method
+        file_like : file-like object or str
+           Should implement ``write`` method or be a file name
         byteswap : boolean
           Flag if byteswapping the data is required.
 
@@ -439,17 +444,19 @@ class Nifti1Extensions(list):
         -------
         None
         '''
-        for e in self:
-            e.write_to(fileobj, byteswap)
+        with Opener(file_like, 'wb') as fobj:
+            for e in self:
+                e.write_to(fobj, byteswap)
 
     @classmethod
-    def from_fileobj(klass, fileobj, size, byteswap):
-        '''Read header extensions from a fileobj
+    def from_fileobj(klass, file_like, size, byteswap):
+        '''Read header extensions from a file-like object or filename
 
         Parameters
         ----------
-        fileobj : file-like object
-            We begin reading the extensions at the current file position
+        file_like : file-like object
+           Needs to implement ``read`` method or be a filename string We begin
+           reading the extensions at the current file position.
         size : int
             Number of bytes to read. If negative, fileobj will be read till its
             end.
@@ -467,42 +474,43 @@ class Nifti1Extensions(list):
         # read until the whole header is parsed (each extension is a multiple
         # of 16 bytes) or in case of a separate header file till the end
         # (break inside the body)
-        while size >= 16 or size < 0:
-            # the next 8 bytes should have esize and ecode
-            ext_def = fileobj.read(8)
-            # nothing was read and instructed to read till the end
-            # -> assume all extensions where parsed and break
-            if not len(ext_def) and size < 0:
-                break
-            # otherwise there should be a full extension header
-            if not len(ext_def) == 8:
-                raise HeaderDataError('failed to read extension header')
-            ext_def = np.fromstring(ext_def, dtype=np.int32)
-            if byteswap:
-                ext_def = ext_def.byteswap()
-            # be extra verbose
-            ecode = ext_def[1]
-            esize = ext_def[0]
-            if esize % 16:
-                raise HeaderDataError(
-                        'extension size is not a multiple of 16 bytes')
-            # read extension itself; esize includes the 8 bytes already read
-            evalue = fileobj.read(int(esize - 8))
-            if not len(evalue) == esize - 8:
-                raise HeaderDataError('failed to read extension content')
-            # note that we read a full extension
-            size -= esize
-            # store raw extension content, but strip trailing NULL chars
-            evalue = evalue.rstrip(b'\x00')
-            # 'extension_codes' also knows the best implementation to handle
-            # a particular extension type
-            try:
-                ext = extension_codes.handler[ecode](ecode, evalue)
-            except KeyError:
-                # unknown extension type
-                # XXX complain or fail or go with a generic extension
-                ext = Nifti1Extension(ecode, evalue)
-            extensions.append(ext)
+        with Opener(file_like, 'rb') as fileobj:
+            while size >= 16 or size < 0:
+                # the next 8 bytes should have esize and ecode
+                ext_def = fileobj.read(8)
+                # nothing was read and instructed to read till the end -> assume
+                # all extensions where parsed and break
+                if not len(ext_def) and size < 0:
+                    break
+                # otherwise there should be a full extension header
+                if not len(ext_def) == 8:
+                    raise HeaderDataError('failed to read extension header')
+                ext_def = np.fromstring(ext_def, dtype=np.int32)
+                if byteswap:
+                    ext_def = ext_def.byteswap()
+                # be extra verbose
+                ecode = ext_def[1]
+                esize = ext_def[0]
+                if esize % 16:
+                    raise HeaderDataError(
+                            'extension size is not a multiple of 16 bytes')
+                # read extension itself; esize includes the 8 bytes already read
+                evalue = fileobj.read(int(esize - 8))
+                if not len(evalue) == esize - 8:
+                    raise HeaderDataError('failed to read extension content')
+                # note that we read a full extension
+                size -= esize
+                # store raw extension content, but strip trailing NULL chars
+                evalue = evalue.rstrip(b'\x00')
+                # 'extension_codes' also knows the best implementation to handle
+                # a particular extension type
+                try:
+                    ext = extension_codes.handler[ecode](ecode, evalue)
+                except KeyError:
+                    # unknown extension type
+                    # XXX complain or fail or go with a generic extension
+                    ext = Nifti1Extension(ecode, evalue)
+                extensions.append(ext)
         return extensions
 
 
@@ -565,25 +573,40 @@ class Nifti1Header(SpmAnalyzeHeader):
             self.extensions)
 
     @classmethod
-    def from_fileobj(klass, fileobj, endianness=None, check=True):
-        raw_str = fileobj.read(klass.template_dtype.itemsize)
-        hdr = klass(raw_str, endianness, check)
-        # Read next 4 bytes to see if we have extensions.  The nifti standard
-        # has this as a 4 byte string; if the first value is not zero, then we
-        # have extensions.  
-        extension_status = fileobj.read(4)
-        if len(extension_status) < 4 or extension_status[0] == b'\x00':
-            return hdr
-        # If this is a detached header file read to end
-        if not klass.is_single:
-            extsize = -1
-        else: # otherwise read until the beginning of the data
-            extsize = hdr._structarr['vox_offset'] - fileobj.tell()
-        byteswap = endian_codes['native'] != hdr.endianness
-        hdr.extensions = klass.exts_klass.from_fileobj(fileobj, extsize, byteswap)
+    def from_fileobj(klass, file_like, endianness=None, check=True):
+        ''' Return read header with given or guessed endiancode
+
+        Parameters
+        ----------
+        file_like : file-like object
+           Needs to implement ``read`` method or be a filename string
+        endianness : None or endian code, optional
+           Code specifying endianness of read data
+
+        Returns
+        -------
+        hdr : header instance
+           header object initialized from data in `file_like`
+        '''
+        with Opener(file_like, 'rb') as fileobj:
+            raw_str = fileobj.read(klass.template_dtype.itemsize)
+            hdr = klass(raw_str, endianness, check)
+            # Read next 4 bytes to see if we have extensions.  The nifti
+            # standard has this as a 4 byte string; if the first value is not
+            # zero, then we have extensions.
+            extension_status = fileobj.read(4)
+            if len(extension_status) < 4 or extension_status[0] == b'\x00':
+                return hdr
+            # If this is a detached header file read to end
+            if not klass.is_single:
+                extsize = -1
+            else: # otherwise read until the beginning of the data
+                extsize = hdr._structarr['vox_offset'] - fileobj.tell()
+            byteswap = endian_codes['native'] != hdr.endianness
+            hdr.extensions = klass.exts_klass.from_fileobj(fileobj, extsize, byteswap)
         return hdr
 
-    def write_to(self, fileobj):
+    def write_to(self, file_like):
         # First check that vox offset is large enough
         if self.is_single:
             vox_offset = self._structarr['vox_offset']
@@ -591,16 +614,17 @@ class Nifti1Header(SpmAnalyzeHeader):
             if vox_offset < min_vox_offset:
                 raise HeaderDataError('vox offset of %d, but need at least %d'
                                       % (vox_offset, min_vox_offset))
-        super(Nifti1Header, self).write_to(fileobj)
-        if len(self.extensions) == 0:
-            # If single file, write required 0 stream to signal no extensions
-            if self.is_single:
-                fileobj.write(b'\x00' * 4)
-            return
-        # Signal there are extensions that follow
-        fileobj.write(b'\x01\x00\x00\x00')
-        byteswap = endian_codes['native'] != self.endianness
-        self.extensions.write_to(fileobj, byteswap)
+        with Opener(file_like, 'wb') as fileobj:
+            super(Nifti1Header, self).write_to(fileobj)
+            if len(self.extensions) == 0:
+                # If single file, write required 0 stream to signal no extensions
+                if self.is_single:
+                    fileobj.write(b'\x00' * 4)
+                return
+            # Signal there are extensions that follow
+            fileobj.write(b'\x01\x00\x00\x00')
+            byteswap = endian_codes['native'] != self.endianness
+            self.extensions.write_to(fileobj, byteswap)
 
     def get_best_affine(self):
         ''' Select best of available transforms '''

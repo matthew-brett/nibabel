@@ -106,6 +106,7 @@ The same for logging::
 """
 import numpy as np
 
+from .openers import Opener
 from .volumeutils import (pretty_mapping, endian_codes, native_code,
                           swapped_code)
 from . import imageglobals as imageglobals
@@ -173,22 +174,23 @@ class WrapStruct(object):
         return
 
     @classmethod
-    def from_fileobj(klass, fileobj, endianness=None, check=True):
+    def from_fileobj(klass, file_like, endianness=None, check=True):
         ''' Return read structure with given or guessed endiancode
 
         Parameters
         ----------
-        fileobj : file-like object
-           Needs to implement ``read`` method
+        file_like : file-like object
+           Needs to implement ``read`` method or be a filename string
         endianness : None or endian code, optional
            Code specifying endianness of read data
 
         Returns
         -------
         wstr : WrapStruct object
-           WrapStruct object initialized from data in fileobj
+           WrapStruct object initialized from data in `file_like`
         '''
-        raw_str = fileobj.read(klass.template_dtype.itemsize)
+        with Opener(file_like) as fobj:
+            raw_str = fobj.read(klass.template_dtype.itemsize)
         return klass(raw_str, endianness, check)
 
     @property
@@ -209,15 +211,16 @@ class WrapStruct(object):
         '''
         return self._structarr.tostring()
 
-    def write_to(self, fileobj):
-        ''' Write structure to fileobj
+    def write_to(self, file_like):
+        ''' Write structure to file-like object or filename
 
-        Write starts at fileobj current file position.
+        Write starts at `file_like` current file position if `file_like` is a
+        file-like object rather than a filename.
 
         Parameters
         ----------
-        fileobj : file-like object
-           Should implement ``write`` method
+        fileobj : file-like object or str
+           Should implement ``write`` method or be file name.
 
         Returns
         -------
@@ -232,7 +235,8 @@ class WrapStruct(object):
         >>> wstr.binaryblock == str_io.getvalue()
         True
         '''
-        fileobj.write(self.binaryblock)
+        with Opener(file_like, 'wb') as fobj:
+            fobj.write(self.binaryblock)
 
     @property
     def endianness(self):

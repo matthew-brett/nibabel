@@ -39,6 +39,7 @@ from unittest import TestCase
 
 from numpy.testing import assert_array_equal
 
+from ..tmpdirs import InTemporaryDirectory
 from ..testing import (assert_equal, assert_true, assert_false,
                        assert_raises, assert_not_equal)
 
@@ -150,6 +151,12 @@ class _TestWrapStructBase(TestCase):
         hdr2 = self.header_class.from_fileobj(str_io)
         assert_equal(hdr2.endianness, native_code)
         assert_equal(hdr2.binaryblock, hdr.binaryblock)
+        # Check filename works as well
+        with InTemporaryDirectory():
+            hdr.write_to('test.fil')
+            hdr2 = self.header_class.from_fileobj('test.fil')
+            assert_equal(hdr2.endianness, native_code)
+            assert_equal(hdr2.binaryblock, hdr.binaryblock)
 
     def test_mappingness(self):
         hdr = self.header_class()

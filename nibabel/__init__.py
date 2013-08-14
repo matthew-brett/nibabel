@@ -49,6 +49,7 @@ from .spm99analyze import Spm99AnalyzeHeader, Spm99AnalyzeImage
 from .spm2analyze import Spm2AnalyzeHeader, Spm2AnalyzeImage
 from .nifti1 import Nifti1Header, Nifti1Image, Nifti1Pair
 from .minc import Minc1Image
+from .minc2 import Minc2Image
 # Backwards compatiblity for MINC1
 from .minc import MincImage
 from .freesurfer import MGHImage

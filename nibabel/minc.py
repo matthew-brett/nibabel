@@ -63,6 +63,12 @@ class Minc1File(object):
         self._image_max = self._mincfile.variables['image-max']
         self._image_min = self._mincfile.variables['image-min']
 
+    def _get_dimensions(self, var):
+        # Dimensions for a particular variable
+        # Differs for MINC1 and MINC2 - see:
+        # http://en.wikibooks.org/wiki/MINC/Reference/MINC2.0_File_Format_Reference#Associating_HDF5_dataspaces_with_MINC_dimensions
+        return var.dimensions
+
     def get_data_dtype(self):
         typecode = self._image.typecode()
         if typecode == 'f':
@@ -145,11 +151,13 @@ class Minc1File(object):
             return data
         image_max = self._image_max
         image_min = self._image_min
-        if image_max.dimensions != image_min.dimensions:
+        mx_dims = self._get_dimensions(self._image_max)
+        mn_dims = self._get_dimensions(self._image_min)
+        if mx_dims != mn_dims:
             raise MincError('"image-max" and "image-min" do not '
                              'have the same dimensions')
-        nscales = len(image_max.dimensions)
-        if image_max.dimensions != self._dim_names[:nscales]:
+        nscales = len(mx_dims)
+        if mx_dims != self._dim_names[:nscales]:
             raise MincError('image-max and image dimensions '
                             'do not match')
         dmin, dmax = self._get_valid_range()
@@ -223,7 +231,7 @@ class Minc1Image(SpatialImage):
             zooms = minc_file.get_zooms()
             header = klass.header_class(data_dtype, shape, zooms)
             data = klass.ImageArrayProxy(minc_file)
-        return Minc1Image(data, affine, header, extra=None, file_map=file_map)
+        return klass(data, affine, header, extra=None, file_map=file_map)
 
 
 load = Minc1Image.load

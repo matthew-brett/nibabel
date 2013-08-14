@@ -14,9 +14,8 @@ import bz2
 
 import numpy as np
 
-from ..externals.netcdf import netcdf_file as netcdf
-
 from .. import load, Nifti1Image
+from ..externals.netcdf import netcdf_file
 from .. import minc
 from ..minc import Minc1File, Minc1Image
 
@@ -36,10 +35,10 @@ def test_old_namespace():
     assert_true(MincImage is M1)
 
 
-class TestMinc1File(object):
+class _TestMincFile(object):
     module = minc
-    image_class = Minc1File
-    cdf_opener = netcdf
+    file_class = Minc1File
+    opener = netcdf_file
     example_params = dict(
         fname = os.path.join(data_path, 'tiny.mnc'),
         shape = (10,20,20),
@@ -55,8 +54,8 @@ class TestMinc1File(object):
         mean = 0.60602819)
 
     def test_mincfile(self):
-        cdf_obj = self.cdf_opener(self.example_params['fname'], 'r')
-        mnc = self.image_class(cdf_obj)
+        mnc_obj = self.opener(self.example_params['fname'], 'r')
+        mnc = self.file_class(mnc_obj)
         assert_equal(mnc.get_data_dtype().type, self.example_params['type'])
         assert_equal(mnc.get_data_shape(), self.example_params['shape'])
         assert_equal(mnc.get_zooms(), self.example_params['zooms'])
@@ -78,8 +77,12 @@ class TestMinc1File(object):
         assert_array_equal(ni_img.get_affine(), self.example_params['affine'])
         assert_array_equal(ni_img.get_data(), data)
 
+
+class TestMinc1File(_TestMincFile):
+
     def test_compressed(self):
         # we can read minc compressed
+        # Not so for MINC2; hence this small sub-class
         content = open(self.example_params['fname'], 'rb').read()
         openers_exts = ((gzip.open, '.gz'), (bz2.BZ2File, '.bz2'))
         with InTemporaryDirectory():

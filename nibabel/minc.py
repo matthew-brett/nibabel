@@ -56,6 +56,12 @@ class Minc1File(object):
                 raise ValueError('Irregular spacing not supported')
         self._spatial_dims = [name for name in self._dim_names
                              if name.endswith('space')]
+        # the MINC standard appears to allow the following variables to
+        # be undefined.
+        # http://www.bic.mni.mcgill.ca/software/minc/minc1_format/node16.html
+        # It wasn't immediately obvious what the defaults were.
+        self._image_max = self._mincfile.variables['image-max']
+        self._image_min = self._mincfile.variables['image-min']
 
     def get_data_dtype(self):
         typecode = self._image.typecode()
@@ -137,12 +143,8 @@ class Minc1File(object):
         ddt = self.get_data_dtype()
         if ddt.type in np.sctypes['float']:
             return data
-        # the MINC standard appears to allow the following variables to
-        # be undefined.
-        # http://www.bic.mni.mcgill.ca/software/minc/minc1_format/node16.html
-        # It wasn't immediately obvious what the defaults were.
-        image_max = self._mincfile.variables['image-max']
-        image_min = self._mincfile.variables['image-min']
+        image_max = self._image_max
+        image_min = self._image_min
         if image_max.dimensions != image_min.dimensions:
             raise MincError('"image-max" and "image-min" do not '
                              'have the same dimensions')

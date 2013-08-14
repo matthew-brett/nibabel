@@ -48,6 +48,8 @@ from .analyze import AnalyzeHeader, AnalyzeImage
 from .spm99analyze import Spm99AnalyzeHeader, Spm99AnalyzeImage
 from .spm2analyze import Spm2AnalyzeHeader, Spm2AnalyzeImage
 from .nifti1 import Nifti1Header, Nifti1Image, Nifti1Pair
+from .minc import Minc1Image
+# Backwards compatiblity for MINC1
 from .minc import MincImage
 from .freesurfer import MGHImage
 from .funcs import (squeeze_image, concat_images, four_to_three,

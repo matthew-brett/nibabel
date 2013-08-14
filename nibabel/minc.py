@@ -33,8 +33,8 @@ class MincError(Exception):
     pass
 
 
-class MincFile(object):
-    ''' Class to wrap MINC file
+class Minc1File(object):
+    ''' Class to wrap MINC 1 format opened netcdf object
 
     Although it has some of the same methods as a ``Header``, we use
     this only when reading a MINC file, to pull out useful header
@@ -197,12 +197,12 @@ class MincImageArrayProxy(object):
         return self.minc_file.get_scaled_data()
 
 
-class MincImage(SpatialImage):
-    ''' Class for MINC images
+class Minc1Image(SpatialImage):
+    ''' Class for MINC 1 format images
 
-    The MINC image class uses the default header type, rather than a
-    specific MINC header type - and reads the relevant information from
-    the MINC file on load.
+    The MINC 1 image class uses the default header type, rather than a specific
+    MINC header type - and reads the relevant information from the MINC file on
+    load.
     '''
     files_types = (('image', '.mnc'),)
     _compressed_exts = ('.gz', '.bz2')
@@ -212,7 +212,7 @@ class MincImage(SpatialImage):
     @classmethod
     def from_file_map(klass, file_map):
         with file_map['image'].get_prepare_fileobj() as fobj:
-            minc_file = MincFile(netcdf_file(fobj))
+            minc_file = Minc1File(netcdf_file(fobj))
             affine = minc_file.get_affine()
             if affine.shape != (4, 4):
                 raise MincError('Image does not have 3 spatial dimensions')
@@ -221,7 +221,11 @@ class MincImage(SpatialImage):
             zooms = minc_file.get_zooms()
             header = klass.header_class(data_dtype, shape, zooms)
             data = klass.ImageArrayProxy(minc_file)
-        return MincImage(data, affine, header, extra=None, file_map=file_map)
+        return Minc1Image(data, affine, header, extra=None, file_map=file_map)
 
 
-load = MincImage.load
+load = Minc1Image.load
+
+# Backwards compatibility; please use Minc1File, Minc1Image instead
+MincFile = Minc1File
+MincImage = Minc1Image

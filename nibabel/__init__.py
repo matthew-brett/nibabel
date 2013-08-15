@@ -49,8 +49,9 @@ from .spm2analyze import Spm2AnalyzeHeader, Spm2AnalyzeImage
 from .nifti1 import Nifti1Header, Nifti1Image, Nifti1Pair
 from .minc1 import Minc1Image
 from .minc2 import Minc2Image
-# Backwards compatiblity for MINC1
-# from . import minc
+# Deprecated backwards compatiblity for MINC1
+from .deprecated import ModuleProxy as _ModuleProxy
+minc = _ModuleProxy('nibabel.minc')
 from .minc1 import MincImage
 from .freesurfer import MGHImage
 from .funcs import (squeeze_image, concat_images, four_to_three,

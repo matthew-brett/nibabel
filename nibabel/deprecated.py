@@ -1,3 +1,5 @@
+import warnings
+
 class ModuleProxy(object):
     def __init__(self, module_name):
         self._module_name = module_name
@@ -12,3 +14,12 @@ class ModuleProxy(object):
 
     def __repr__(self):
         return "<module proxy for {0}".format(self._module_name)
+
+
+class FutureWarningMixin(object):
+    warn_message = 'This class will be removed in future versions'
+    def __init__(self, *args, **kwargs):
+        warnings.warn(self.warn_message,
+                      FutureWarning,
+                      stacklevel=2)
+        super(FutureWarningMixin, self).__init__(*args, **kwargs)

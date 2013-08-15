@@ -12,6 +12,8 @@ from .externals.netcdf import netcdf_file
 
 from .spatialimages import SpatialImage
 
+from .deprecated import FutureWarningMixin
+
 _dt_dict = {
     ('b','unsigned'): np.uint8,
     ('b','signed__'): np.int8,
@@ -236,6 +238,8 @@ class Minc1Image(SpatialImage):
 
 load = Minc1Image.load
 
-# Backwards compatibility; please use Minc1File, Minc1Image instead
-MincFile = Minc1File
-MincImage = Minc1Image
+# Backwards compatibility
+class MincFile(FutureWarningMixin, Minc1File):
+    pass
+class MincImage(FutureWarningMixin, Minc1Image):
+    pass

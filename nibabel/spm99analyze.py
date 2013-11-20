@@ -58,9 +58,9 @@ class SpmAnalyzeHeader(analyze.AnalyzeHeader):
         SPM99 header implements slope, but intercept is always None because
         SPM99 analyze cannot store intercepts.
 
-        If `process` is True, and slope is 0.0 return None for slope.  For
-        reading this (elsewhere) resultings in the default slope of 1.0 which is
-        what SPM99 gives for reading with a `slope` of 0.0.
+        If `process` is True, and slope is 0.0 or NaN return None for slope.
+        For reading this (elsewhere) resultings in the default slope of 1.0
+        which is what SPM99 gives for reading with a `slope` of 0.0.
 
         Parameters
         ----------
@@ -80,8 +80,9 @@ class SpmAnalyzeHeader(analyze.AnalyzeHeader):
             return intercept from header, or None if header does not implement
             intercepts.
         '''
-        slope = self._structarr['scl_slope']
-        if process and slope == 0.0:
+        # Cast to float for compatibility with other image types
+        slope = float(self._structarr['scl_slope'])
+        if process and (slope == 0 or np.isnan(slope)):
             return None, None
         return slope, None
 
@@ -93,7 +94,7 @@ class SpmAnalyzeHeader(analyze.AnalyzeHeader):
         slope) + inter``
 
         The SPM Analyze header can't save an intercept value, and we raise an
-        error for ``inter != 0``
+        error for ``inter != 0``.
 
         Parameters
         ----------
@@ -102,13 +103,13 @@ class SpmAnalyzeHeader(analyze.AnalyzeHeader):
            not-finite value, ``get_slope_inter`` returns (None, None), i.e.
            `inter` is ignored unless there is a valid value for `slope`.
         inter : None or float, optional
-           intercept (dc offset).  If float, must be 0, because SPM99 cannot
-           store intercepts.
+           intercept (dc offset).  If float, must be 0 or NaN, because SPM99
+           cannot store intercepts.
         '''
         if slope is None:
             slope = 0.0
         self._structarr['scl_slope'] = slope
-        if inter is None or inter == 0:
+        if inter in (None, 0) or np.isnan(inter):
             return
         raise HeaderTypeError('Cannot set non-zero intercept '
                               'for SPM headers')

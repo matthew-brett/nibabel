@@ -30,6 +30,7 @@ from ..casting import type_info
 from ..testing import (assert_equal, assert_true, assert_false, assert_raises)
 
 from . import test_analyze
+from .test_helpers import nan_equal
 
 
 class TestSpm99AnalyzeHeader(test_analyze.TestAnalyzeHeader):
@@ -237,12 +238,15 @@ def test_slope_inter():
         ((None,), (None, None), (0.0, None)),
         ((1.0, None), (1.0, None), (1.0, None)),
         ((0.0, None), (None, None), (0.0, None)),
-        ((None, 0.0), (None, None), (0.0, None))
+        ((None, 0.0), (None, None), (0.0, None)),
+        ((np.nan, 0.0), (None, None), (np.nan, None)),
+        ((1.0, np.nan), (1.0, None), (1.0, None)),
+        ((np.nan, np.nan), (None, None), (np.nan, None)),
     ):
         hdr.set_slope_inter(*in_tup)
         assert_equal(hdr.get_slope_inter(), proc_tup)
         assert_equal(hdr.get_slope_inter(process=True), proc_tup)
-        assert_equal(hdr.get_slope_inter(process=False), noproc_tup)
+        assert_true(nan_equal(hdr.get_slope_inter(process=False), noproc_tup))
         # Check set survives through checking
         hdr = Spm99AnalyzeHeader.from_header(hdr, check=True)
         assert_equal(hdr.get_slope_inter(), proc_tup)

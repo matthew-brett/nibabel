@@ -520,14 +520,15 @@ def test_scaling():
 def test_slope_inter():
     hdr = AnalyzeHeader()
     assert_equal(hdr.get_slope_inter(), (None, None))
-    for slinter in ((None,),
-                    (None, None),
-                    (1.0,),
-                    (1.0, None),
-                    (None, 0),
-                    (1.0, 0)):
-        hdr.set_slope_inter(*slinter)
-        assert_equal(hdr.get_slope_inter(), (None, None))
+    for process in (True, False):
+        for slinter in ((None,),
+                        (None, None),
+                        (1.0,),
+                        (1.0, None),
+                        (None, 0),
+                        (1.0, 0)):
+            hdr.set_slope_inter(*slinter)
+            assert_equal(hdr.get_slope_inter(process=process), (None, None))
     assert_raises(HeaderTypeError, hdr.set_slope_inter, 1.1)
     assert_raises(HeaderTypeError, hdr.set_slope_inter, 1.0, 0.1)
 

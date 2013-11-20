@@ -52,14 +52,36 @@ class SpmAnalyzeHeader(analyze.AnalyzeHeader):
         hdr_data['scl_slope'] = 1
         return hdr_data
 
-    def get_slope_inter(self):
-        ''' Get scalefactor and intercept 
+    def get_slope_inter(self, process=True):
+        ''' Get slope and intercept from header
 
-        If scalefactor is 0.0 return None to indicate no scalefactor.  Intercept
-        is always None because SPM99 analyze cannot store intercepts.
+        SPM99 header implements slope, but intercept is always None because
+        SPM99 analyze cannot store intercepts.
+
+        If `process` is True, and slope is 0.0 return None for slope.  For
+        reading this (elsewhere) resultings in the default slope of 1.0 which is
+        what SPM99 gives for reading with a `slope` of 0.0.
+
+        Parameters
+        ----------
+        process : bool, optional
+            Whether to process `slope`, `intercept` before returning
+
+        Returns
+        -------
+        slope : None or float
+            If `process` is True return a valid slope for reading data from
+            disk, or None if there is no valid slope.  If process is False,
+            return scalefactor from header, or None if header does not implement
+            scaling.
+        inter : None or float
+            If `process` is True return a valid intercept for reading data from
+            disk, or None if there is no valid intercept.  If process is False,
+            return intercept from header, or None if header does not implement
+            intercepts.
         '''
         slope = self._structarr['scl_slope']
-        if slope == 0.0:
+        if process and slope == 0.0:
             return None, None
         return slope, None
 
@@ -70,15 +92,15 @@ class SpmAnalyzeHeader(analyze.AnalyzeHeader):
         data is ``arr``, then the scaled image data will be ``(arr *
         slope) + inter``
 
-        Note that the SPM Analyze header can't save an intercept value,
-        and we raise an error for ``inter != 0``
+        The SPM Analyze header can't save an intercept value, and we raise an
+        error for ``inter != 0``
 
         Parameters
         ----------
         slope : None or float
-           If None, implies `slope` of 1.0, `inter` of 0.0 (i.e. no
-           scaling of the image data).  If `slope` is not, we ignore the
-           passed value of `inter`
+           If None, implies `slope`  of 0. When the slope is set to 0 or a
+           not-finite value, ``get_slope_inter`` returns (None, None), i.e.
+           `inter` is ignored unless there is a valid value for `slope`.
         inter : None or float, optional
            intercept (dc offset).  If float, must be 0, because SPM99 cannot
            store intercepts.

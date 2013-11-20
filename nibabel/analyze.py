@@ -702,10 +702,28 @@ class AnalyzeHeader(LabeledWrapStruct):
         '''
         return int(self._structarr['vox_offset'])
 
-    def get_slope_inter(self):
+    def get_slope_inter(self, process=True):
         ''' Get scalefactor and intercept
 
-        These are not implemented for basic Analyze
+        Basic analyze has neither slope nor intercept.
+
+        Parameters
+        ----------
+        process : bool, optional
+            Whether to process scalefactors before returning
+
+        Returns
+        -------
+        slope : None or float
+            If `process` is True return a valid slope for reading data from
+            disk, or None if there is no valid slope.  If process is False,
+            return scalefactor from header, or None if header does not implement
+            scaling.
+        inter : None or float
+            If `process` is True return a valid intercept for reading data from
+            disk, or None if there is no valid intercept.  If process is False,
+            return intercept from header, or None if header does not implement
+            intercepts.
         '''
         return None, None
 

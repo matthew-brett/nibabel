@@ -984,16 +984,26 @@ class Nifti1Header(SpmAnalyzeHeader):
         hdr['srow_y'][:] = affine[1, :]
         hdr['srow_z'][:] = affine[2, :]
 
-    def get_slope_inter(self):
-        ''' Get data scaling (slope) and DC offset (intercept) from header data
+    def get_slope_inter(self, process=True):
+        ''' Get slope and intercept from header
+
+        Parameters
+        ----------
+        process : bool, optional
+            Whether to process `slope`, `intercept` before returning
 
         Returns
         -------
         slope : None or float
-           scaling (slope).  None if there is no valid scaling from these fields
+            If `process` is True return a valid slope for reading data from
+            disk, or None if there is no valid slope.  If process is False,
+            return scalefactor from header, or None if header does not implement
+            scaling.
         inter : None or float
-           offset (intercept). None if there is no valid scaling or if offset is
-           not finite.
+            If `process` is True return a valid intercept for reading data from
+            disk, or None if there is no valid intercept.  If process is False,
+            return offset from header, or None if header does not implement
+            intercepts.
 
         Examples
         --------
@@ -1016,13 +1026,15 @@ class Nifti1Header(SpmAnalyzeHeader):
         '''
         # Note that we are returning float (float64) scalefactors and
         # intercepts, although they are stored as in nifti1 as float32.
-        scale = float(self['scl_slope'])
-        dc_offset = float(self['scl_inter'])
-        if scale == 0 or not np.isfinite(scale):
+        slope = float(self['scl_slope'])
+        inter = float(self['scl_inter'])
+        if not process:
+            return slope, inter
+        if slope == 0 or not np.isfinite(slope):
             return None, None
-        if not np.isfinite(dc_offset):
-            dc_offset = None
-        return scale, dc_offset
+        if not np.isfinite(inter):
+            inter = None
+        return slope, inter
 
     def set_slope_inter(self, slope, inter=0.0):
         ''' Set slope and / or intercept into header

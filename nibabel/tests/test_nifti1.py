@@ -515,18 +515,22 @@ class TestNifti1PairHeader(tana.TestAnalyzeHeader):
     def test_slope_inter(self):
         hdr = self.header_class()
         assert_equal(hdr.get_slope_inter(), (1.0, 0.0))
-        for intup, outup in (((2.0,), (2.0, 0.0)),
-                            ((None,), (None, None)),
-                            ((3.0, None), (3.0, 0.0)),
-                            ((0.0, None), (None, None)),
-                            ((None, 0.0), (None, None)),
-                            ((None, 3.0), (None, None)),
-                            ((2.0, 3.0), (2.0, 3.0))):
-            hdr.set_slope_inter(*intup)
-            assert_equal(hdr.get_slope_inter(), outup)
+        for in_tup, proc_tup, noproc_tup in (
+            ((2.0,), (2.0, 0.0), (2.0, 0.0)),
+            ((None,), (None, None), (0.0, 0.0)),
+            ((3.0, None), (3.0, 0.0), (3.0, 0.0)),
+            ((0.0, None), (None, None), (0.0, 0.0)),
+            ((None, 0.0), (None, None), (0.0, 0.0)),
+            ((None, 3.0), (None, None), (0.0, 3.0)),
+            ((2.0, 3.0), (2.0, 3.0), (2.0, 3.0)),
+            ):
+            hdr.set_slope_inter(*in_tup)
+            assert_equal(hdr.get_slope_inter(), proc_tup)
+            assert_equal(hdr.get_slope_inter(process=True), proc_tup)
+            assert_equal(hdr.get_slope_inter(process=False), noproc_tup)
             # Check set survives through checking
             hdr = self.header_class.from_header(hdr, check=True)
-            assert_equal(hdr.get_slope_inter(), outup)
+            assert_equal(hdr.get_slope_inter(), proc_tup)
 
     def test_xyzt_units(self):
         hdr = self.header_class()

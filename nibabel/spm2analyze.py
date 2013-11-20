@@ -32,30 +32,39 @@ class Spm2AnalyzeHeader(spm99.Spm99AnalyzeHeader):
     # Copies of module level definitions
     template_dtype = header_dtype
 
-    def get_slope_inter(self):
+    def get_slope_inter(self, process=True):
         ''' Get data scaling (slope) and offset (intercept) from header data
 
-        Uses the algorithm from SPM2 spm_vol_ana.m by John Ashburner
+        If `process` is True, uses the algorithm from SPM2 `spm_vol_ana.m` by
+        John Ashburner to get `inter`. If `process` is False, always return None
+        for `inter` (intercept not fully supported for SPM2).
+
+        `self` (the header) should have fields (``_getitem__``):
+
+        * scl_slope - slope
+        * scl_inter - possible intercept (SPM2 use - shared by nifti)
+        * glmax - the (recorded) maximum value in the data (unscaled)
+        * glmin - recorded minimum unscaled value
+        * cal_max - the calibrated (scaled) maximum value in the dataset
+        * cal_min - ditto minimum value
 
         Parameters
         ----------
-        self : header
-           Mapping with fields:
-           * scl_slope - slope
-           * scl_inter - possible intercept (SPM2 use - shared by nifti)
-           * glmax - the (recorded) maximum value in the data (unscaled)
-           * glmin - recorded minimum unscaled value
-           * cal_max - the calibrated (scaled) maximum value in the dataset
-           * cal_min - ditto minimum value
+        process : bool, optional
+            Whether to process `slope`, `intercept` before returning
 
         Returns
         -------
-        scl_slope : None or float
-            scaling (slope).  None if there is no valid scaling from
-            these fields
-        scl_inter : None or float
-            offset (intercept).  Also None if there is no valid scaling,
-            offset
+        slope : None or float
+            If `process` is True return a valid slope for reading data from
+            disk, or None if there is no valid slope.  If process is False,
+            return scalefactor from header, or None if header does not implement
+            scaling.
+        inter : None or float
+            If `process` is True return a valid intercept for reading data from
+            disk, or None if there is no valid intercept.  If process is False,
+            return intercept from header, or None if header does not implement
+            intercepts.
 
         Examples
         --------
@@ -96,6 +105,9 @@ class Spm2AnalyzeHeader(spm99.Spm99AnalyzeHeader):
         '''
         # get scaling factor from 'scl_slope' (funused1)
         scale = float(self['scl_slope'])
+        if not process:
+            # Offset is not fully supported, ignore for no-process case
+            return scale, None
         if np.isfinite(scale) and scale:
             # try to get offset from scl_inter
             dc_offset = float(self['scl_inter'])

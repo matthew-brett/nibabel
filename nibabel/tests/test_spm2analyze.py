@@ -56,17 +56,20 @@ def test_origin_affine():
 def test_slope_inter():
     hdr = Spm2AnalyzeHeader()
     assert_equal(hdr.get_slope_inter(), (1.0, 0.0))
-    for intup, outup in (((2.0,), (2.0, 0.0)),
-                         ((None,), (None, None)),
-                         ((1.0, None), (1.0, 0.0)),
-                         ((0.0, None), (None, None)),
-                         ((None, 0.0), (None, None))):
-        hdr.set_slope_inter(*intup)
-        assert_equal(hdr.get_slope_inter(), outup)
+    for in_tup, proc_tup, noproc_tup in (
+        ((2.0,), (2.0, 0.), (2.0, None)),
+        ((None,), (None, None), (0.0, None)),
+        ((1.0, None), (1.0, 0.0), (1.0, None)),
+        ((0.0, None), (None, None), (0.0, None)),
+        ((None, 0.0), (None, None), (0.0, None))
+    ):
+        hdr.set_slope_inter(*in_tup)
+        assert_equal(hdr.get_slope_inter(), proc_tup)
+        assert_equal(hdr.get_slope_inter(process=True), proc_tup)
+        assert_equal(hdr.get_slope_inter(process=False), noproc_tup)
         # Check set survives through checking
         hdr = Spm2AnalyzeHeader.from_header(hdr, check=True)
-        assert_equal(hdr.get_slope_inter(), outup)
+        assert_equal(hdr.get_slope_inter(), proc_tup)
     # Setting not-zero to offset raises error
     assert_raises(HeaderTypeError, hdr.set_slope_inter, None, 1.1)
     assert_raises(HeaderTypeError, hdr.set_slope_inter, 2.0, 1.1)
-

@@ -81,14 +81,14 @@ zooms, in particular, negative X zooms.  We did not do this because the image
 can be loaded with and without a default flip, so the saved zoom will not
 constrain the affine.
 '''
-import sys
 
 import numpy as np
 
 from .volumeutils import (native_code, swapped_code, make_dt_codes,
                           shape_zoom_affine, array_from_file, seek_tell,
                           apply_read_scaling)
-from .arraywriters import make_array_writer, get_slope_inter, WriterError
+from .arraywriters import (make_array_writer, get_slope_inter, WriterError,
+                           ArrayWriter)
 from .wrapstruct import LabeledWrapStruct
 from .spatialimages import (HeaderDataError, HeaderTypeError,
                             SpatialImage)
@@ -840,6 +840,7 @@ class AnalyzeImage(SpatialImage):
             dataobj, affine, header, extra, file_map)
         # Reset consumable values
         self._header.set_data_offset(0)
+        self._header.set_slope_inter(None, None)
     __init__.__doc__ = SpatialImage.__init__.__doc__
 
     def get_header(self):
@@ -915,10 +916,22 @@ class AnalyzeImage(SpatialImage):
         self.update_header()
         hdr = self._header
         out_dtype = self.get_data_dtype()
-        arr_writer = make_array_writer(data,
-                                       out_dtype,
-                                       hdr.has_data_slope,
-                                       hdr.has_data_intercept)
+        # Store consumable values for later restore
+        offset = hdr.get_data_offset()
+        # Scalars of slope, offset to get immutable values
+        slope = (np.asscalar(hdr['scl_slope']) if hdr.has_data_slope
+                 else np.nan)
+        inter = (np.asscalar(hdr['scl_inter']) if hdr.has_data_intercept
+                 else np.nan)
+        # Check whether to calculate slope / inter
+        scale_me = np.all(np.isnan((slope, inter)))
+        if scale_me:
+            arr_writer = make_array_writer(data,
+                                           out_dtype,
+                                           hdr.has_data_slope,
+                                           hdr.has_data_intercept)
+        else:
+            arr_writer = ArrayWriter(data, out_dtype, check_scaling=False)
         hdr_fh, img_fh = self._get_fileholders(file_map)
         # Check if hdr and img refer to same file; this can happen with odd
         # analyze images but most often this is because it's a single nifti file
@@ -928,11 +941,11 @@ class AnalyzeImage(SpatialImage):
             imgf = hdrf
         else:
             imgf = img_fh.get_prepare_fileobj(mode='wb')
-        # Store consumable values for later restore
-        offset = hdr.get_data_offset()
         # Set values as necessary
-        slope, inter = get_slope_inter(arr_writer)
-        self._write_header(hdrf, hdr, slope, inter)
+        if scale_me:
+            self._write_header(hdrf, hdr, *get_slope_inter(arr_writer))
+        else:
+            self._write_header(hdrf, hdr, slope, inter)
         # Write image
         shape = hdr.get_data_shape()
         if data.shape != shape:
@@ -947,6 +960,10 @@ class AnalyzeImage(SpatialImage):
         self.file_map = file_map
         # Restore any changed consumable values
         hdr.set_data_offset(offset)
+        if hdr.has_data_slope:
+            hdr['scl_slope'] = slope
+        if hdr.has_data_intercept:
+            hdr['scl_inter'] = inter
 
 
 load = AnalyzeImage.load

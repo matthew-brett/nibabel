@@ -21,7 +21,7 @@ import itertools
 import numpy as np
 
 from ..externals.six import BytesIO, StringIO
-from ..volumeutils import array_to_file
+from ..volumeutils import array_to_file, apply_read_scaling
 from ..spatialimages import (HeaderDataError, HeaderTypeError)
 from ..analyze import AnalyzeHeader, AnalyzeImage
 from ..nifti1 import Nifti1Header
@@ -572,6 +572,7 @@ class TestAnalyzeImage(tsi.TestSpatialImage):
         hdr.set_data_shape(arr.shape)
         hdr.set_data_dtype(arr.dtype)
         hdr.set_data_offset(0)
+        hdr.set_slope_inter(np.nan, np.nan)
         assert_equal(img.header, hdr)
 
     def test_data_hdr_cache(self):

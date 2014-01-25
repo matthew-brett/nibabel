@@ -11,7 +11,8 @@
 import numpy as np
 
 from .orientations import (io_orientation, inv_ornt_aff, flip_axis,
-                           apply_orientation, OrientationError)
+                           apply_orientation, OrientationError,
+                           axcodes2ornt, ornt_transform)
 from .loadsave import load
 
 
@@ -157,6 +158,49 @@ def four_to_three(img):
     return imgs
 
 
+def as_voxel_orientation(img, axcodes='LAS', enforce_diag=False):
+    ''' Return `img` with data reordered to be closest to `axcodes`
+
+    Parameters
+    ----------
+    img : ``spatialimage``
+    axcodes : sequence, optional
+        Character codes giving orientation of each spatial voxel axis
+    enforce_diag : {False, True}, optional
+       If True, before transforming image, check if the resulting image
+       affine will be close to diagonal, and if not, raise an error
+
+    Returns
+    -------
+    ordered_img : ``spatialimage``
+       Version of `img` where the underlying array may have been
+       reordered and / or flipped so that axes 0,1,2 in the input data
+       correspond most closely with the orientations named in `axcodes.
+       We modify the affine accordingly.  If `img` is already has the correct
+       data ordering, we just return `img` unmodified.
+    '''
+    aff = img.affine
+    current2las = io_orientation(aff)
+    las2desired = axcodes2ornt(axcodes)
+    desired2las = ornt_transform(las2desired, axcodes2ornt('LAS'))
+    if np.all(current2las == desired2las):
+        # however, the affine may not be diagonal
+        if enforce_diag and not _aff_is_diag(aff):
+            raise OrientationError('Transformed affine is not diagonal')
+        return img
+    needed_ornt = ornt_transform(current2las, desired2las)
+    shape = img.shape
+    t_aff = inv_ornt_aff(needed_ornt, shape)
+    out_aff = np.dot(aff, t_aff)
+    # check if we are going to end up with something diagonal
+    if enforce_diag and not _aff_is_diag(aff):
+        raise OrientationError('Transformed affine is not diagonal')
+    # we need to transform the data
+    arr = img.get_data()
+    t_arr = apply_orientation(arr, needed_ornt)
+    return img.__class__(t_arr, out_aff, img.get_header())
+
+
 def as_closest_canonical(img, enforce_diag=False):
     ''' Return `img` with data reordered to be closest to canonical
 
@@ -179,29 +223,10 @@ def as_closest_canonical(img, enforce_diag=False):
        already has the correct data ordering, we just return `img`
        unmodified.
     '''
-    aff = img.get_affine()
-    ornt = io_orientation(aff)
-    if np.all(ornt == [[0, 1],
-                       [1,1],
-                       [2,1]]): # canonical already
-        # however, the affine may not be diagonal
-        if enforce_diag and not _aff_is_diag(aff):
-            raise OrientationError('Transformed affine is not diagonal')
-        return img
-    shape = img.shape
-    t_aff = inv_ornt_aff(ornt, shape)
-    out_aff = np.dot(aff, t_aff)
-    # check if we are going to end up with something diagonal
-    if enforce_diag and not _aff_is_diag(aff):
-        raise OrientationError('Transformed affine is not diagonal')
-    # we need to transform the data
-    arr = img.get_data()
-    t_arr = apply_orientation(arr, ornt)
-    return img.__class__(t_arr, out_aff, img.get_header())
+    return as_voxel_orientation(img, 'LAS', enforce_diag=enforce_diag)
 
 
 def _aff_is_diag(aff):
     ''' Utility function returning True if affine is nearly diagonal '''
     rzs_aff = aff[:3, :3]
     return np.allclose(rzs_aff, np.diag(np.diag(rzs_aff)))
-

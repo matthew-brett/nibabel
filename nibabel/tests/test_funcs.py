@@ -11,7 +11,10 @@ from __future__ import division, print_function, absolute_import
 
 import numpy as np
 
-from ..funcs import concat_images, as_closest_canonical, OrientationError
+from ..funcs import (concat_images, as_closest_canonical, OrientationError,
+                     as_voxel_orientation)
+from ..orientations import flip_axis
+
 from ..nifti1 import Nifti1Image
 from ..loadsave import save
 
@@ -66,7 +69,7 @@ def test_closest_canonical():
     img = Nifti1Image(arr, np.eye(4))
     xyz_img = as_closest_canonical(img)
     assert_true(img is xyz_img)
-    # a axis flip
+    # an axis flip
     img = Nifti1Image(arr, np.diag([-1,1,1,1]))
     xyz_img = as_closest_canonical(img)
     assert_false(img is xyz_img)
@@ -83,3 +86,15 @@ def test_closest_canonical():
     assert_true(img is xyz_img)
     # it's still not diagnonal
     assert_raises(OrientationError, as_closest_canonical, img, True)
+
+
+def test_as_voxel_orientation():
+    # Tests for code to put image in named voxel orientation
+    arr = np.arange(24).reshape((2,3,4,1))
+    # no funky stuff, returns same thing
+    img = Nifti1Image(arr, np.eye(4))
+    xyz_img = as_voxel_orientation(img, 'LAS')
+    assert_true(img is xyz_img)
+    out_img = as_voxel_orientation(img, 'RAS')
+    assert_array_equal(out_img.get_data(), flip_axis(arr, 0))
+    assert_array_equal(out_img.affine, np.diag([-1, 1, 1, 1]))

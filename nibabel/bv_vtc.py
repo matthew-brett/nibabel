@@ -19,15 +19,38 @@ from .bv import BvError,BvFileHeader,BvFileImage
 from .spatialimages import HeaderDataError, HeaderTypeError
 from .batteryrunners import Report
 
-def _make_vtc_header_dtd(fmrlt,prts):
+def _make_vtc_header_dtd(fmrlt, prts):
     ''' Helper for creating a VTC header dtype with given parameters
+
+    Header format from
+    http://support.brainvoyager.com/installation-introduction/23-file-formats/379-users-guide-23-the-format-of-vtc-files.html
+
+    Parameters
+    ----------
+    fmrlt : int
+        length of FMR file name including terminating zero
+    prts : sequence
+        sequence of ints, giving lengths of PRT filenames, including
+        terminating zeros.
+
+    Returns
+    -------
+    dtd : list
+        data type definition, list of 2-tuples where tuples are (field name,
+        field type definition).  This can be made into a numpy dtype with
+        ``np.dtype(dtd)``
     '''
+    if len(prts) == 0:
+        prt_fmts = [('prt0', 'S1')]
+    else:
+        prt_fmts = [('prt{0}'.format(i), 'S{0}'.format(L+1))
+                    for i, L in enumerate(prts)]
     vtc_header_dtd = \
         [
             ('version', 'i2'),
-            ('fmr', fmrlt),
+            ('fmr', 'S{0}'.format(fmrlt)),
             ('nPrt', 'i2'),
-            ('prts',prts),
+            ('prts', prt_fmts),
             ('currentPrt', 'i2'),
             ('datatype', 'i2'),
             ('volumes', 'i2'),
@@ -124,24 +147,20 @@ class VtcHeader(BvFileHeader):
         # find length of fmr filename (start search after the first 2 bytes)
         # include the stop byte ('\x00') in the string
         fmrl = binaryblock.find('\x00', 2) - 1
-        fmrlt = 'S' + str(fmrl)
 
         # find number of linked PRTs
         nPrt = int(np.fromstring(binaryblock[2+fmrl:2+fmrl+2],np.uint16))
 
         # find length of name(s) of linked PRT(s)
-        if nPrt == 0:
-            prts = [('prt1', 'S1')]
-        else:
-            prts = []
-            point = 2 + fmrl + 3
-            for prt in range(nPrt):
-                prtl = binaryblock.find('\x00', point) - (point-2)
-                prts.append(('prt' + str(prt+1), 'S' + str(prtl)))
-                point += prtl
+        prts = []
+        point = 2 + fmrl + 3
+        for prt in range(nPrt):
+            prtl = binaryblock.find('\x00', point) - (point-2)
+            prts.append(prtl)
+            point += prtl
 
         # deep copy the template
-        newTemplate = _make_vtc_header_dtd(fmrlt,prts)
+        newTemplate = _make_vtc_header_dtd(fmrl, prts)
 
         # handle the items that should be changed
         if item is not None:
@@ -159,7 +178,7 @@ class VtcHeader(BvFileHeader):
         '''
 
         # create the template
-        newTemplate = _make_vtc_header_dtd('S1',[('prt1','S1')])
+        newTemplate = _make_vtc_header_dtd(1, ())
 
         dt = np.dtype(newTemplate)
         hdr = np.zeros((), dtype=dt)
@@ -167,7 +186,7 @@ class VtcHeader(BvFileHeader):
         hdr['version'] = 3
         hdr['fmr'] = ''
         hdr['nPrt'] = 0
-        hdr['prts']['prt1'] = ''
+        hdr['prts']['prt0'] = ''
         hdr['currentPrt'] = 0
         hdr['datatype'] = 2
         hdr['volumes'] = 0

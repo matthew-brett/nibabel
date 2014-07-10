@@ -77,8 +77,10 @@ We might call PAR's orientation "PSL" (Posterior, Superior, Left)
 from __future__ import print_function, division
 
 import warnings
-import numpy as np
 import copy
+
+import numpy as np
+import numpy.linalg as npl
 
 from .externals.six import binary_type
 from .py3k import asbytes
@@ -88,8 +90,12 @@ from .eulerangles import euler2mat
 from .volumeutils import Recoder, array_from_file, apply_read_scaling
 from .arrayproxy import ArrayProxy
 
-# LPS to RAS affine
-LPS_TO_RAS = np.diag([-1, -1, 1, 1])
+# PSL to RAS affine
+PSL_TO_RAS = np.array([[0,  0, -1., 0],
+                       [-1, 0,  0,  0],
+                       [0,  1,  0,  0],
+                       [0,  0,  0,  1],
+                      ])
 
 # PAR header versions we claim to understand
 supported_versions = ['V4.2']
@@ -456,39 +462,35 @@ class PARRECHeader(Header):
         orientation of data is recorded in the "slice orientation" field of the
         PAR header "General Information".
 
-        We first specify the reordering of the data to LPS using a permutation
-        3 x 3.  Then we calculate the rotation of the data using the rotation
-        angles. The voxel sizes give the scaling. The combination of
-        (permutation then scaling then rotation) gives the 3x3 part of the
-        affine.
+        We use the slice orientation to specify the reordering of the data to
+        SPL using a permutation 3 x 3.  Then we calculate the rotation of the
+        data using the rotation angles. The voxel sizes give the scaling. The
+        combination of (scaling then permutation then rotation) gives the 3x3
+        part of the affine.
+
+        We calculate the translation so that the center of the FOV is voxel 0,
+        0, 0 (FOV translation).  If required we apply the extra scanner
+        isocenter translations.
         """
         slice_orientation = self.get_slice_orientation()
         if slice_orientation == 'sagittal':
             # inplane: AP, FH, slices: RL
-            lps_permute = np.array([[  0,  0,  1],
-                                    [  1,  0,  0],
-                                    [  0,  1,  0]])
+            psl_permute = np.eye(3)
         elif slice_orientation == 'transverse':
             # inplane: RL, AP, slices: FH
-            lps_permute = np.array([[  1,  0,  0],
-                                    [  0,  1,  0],
-                                    [  0,  0,  1]])
+            psl_permute = np.array([[  0,  1,  0],
+                                    [  0,  0,  1],
+                                    [  1,  0,  0]])
         elif slice_orientation == 'coronal':
             # inplane: RL, FH, slices: AP
-            lps_permute = np.array([[  1,  0,  0],
-                                    [  0,  0,  1],
-                                    [  0,  1,  0]])
+            psl_permute = np.array([[  0,  0,  1],
+                                    [  0,  1,  0],
+                                    [  1,  0,  0]])
         else:
             raise PARRECError("Unknown slice orientation (%s)."
                               % slice_orientation)
-        # ap_fh_rl (PSL) to LPS
-        PSL_TO_LPS = np.array([[  0,  0,  1],
-                               [  1,  0,  0],
-                               [  0,  1,  0]])
         # hdr has deg, we need radians
         ang_rad = self.general_info['angulation'] * np.pi / 180.0
-        # Order is [ap, fh, rl]; -> LPS
-        ang_rad = PSL_TO_LPS.dot(ang_rad)
         # R2AGUI approach is this, but it comes with remarks ;-)
         # % trying to incorporate AP FH RL rotation angles: determined using some
         # % common sense, Chris Rordon's help + source code and trial and error,
@@ -498,31 +500,29 @@ class PARRECHeader(Header):
         # axes in that order. It's more than possible that PAR assumes rotation
         # in a different order, perhaps y then z then x (PSL order).  We need
         # some relevant data to test this
-        x_rot, y_rot, z_rot = [euler2mat(*row) for row in np.diag(ang_rad)]
-        rot = np.dot(x_rot, np.dot(y_rot, z_rot))
+        y_rot, z_rot, x_rot = [euler2mat(*row) for row in np.diag(ang_rad)]
+        # Rotations are from PSL to voxel space, we need the reverse
+        rot = npl.inv(np.dot(x_rot, np.dot(y_rot, z_rot)))
         # ijk origin should be coordinate of 0, 0, 0 voxel
         # qform should point to the center of the voxel
-        # shape, zooms already in LPS == RAS order
-        lps_shape = np.array(self.get_data_shape()[:3])
-        lps_zooms = np.array(self.get_zooms()[:3])
-        vox_fov = (lps_shape - 1) * lps_zooms # mid-vox to mid-vox FOV
+        # shape, zooms in ijk order (order of data)
+        ijk_shape = np.array(self.get_data_shape()[:3])
+        ijk_zooms = np.array(self.get_zooms()[:3])
+        vox_fov = (ijk_shape - 1) # mid-vox to mid-vox FOV
         fov_center_offset = -vox_fov / 2.0
-        # need to rotate this offset into LPS
-        fov_center_offset = np.dot(rot, fov_center_offset)
         # compose the affine
         aff = np.eye(4)
-        # get the 3x3 part by LPS permutation then scaling with voxelsize then
-        # rotation
-        aff[:3,:3] = np.dot(rot, np.dot(np.diag(lps_zooms), lps_permute))
+        # get the 3x3 part by scaling then psl_permutation then rotation
+        RZS = np.dot(rot, np.dot(psl_permute, np.diag(ijk_zooms)))
+        aff[:3,:3] = RZS
         # Coordinate of 0, 0, 0 voxel is translation part of affine
-        aff[:3,3] = fov_center_offset
+        trans = np.dot(RZS, fov_center_offset)
         if origin == 'scanner':
             # offset to scanner's iso center (always in ap, fh, rl)
-            # -- turn into rl, ap, fh
-            iso_offset = PSL_TO_LPS.dot(self.general_info['off_center'])
-            aff[:3,3] += iso_offset
-        # Currently in LPS; apply LPS -> RAS
-        return np.dot(LPS_TO_RAS, aff)
+            trans += self.general_info['off_center']
+        aff[:3, 3] = trans
+        # Currently in PSL; apply PSL -> RAS
+        return np.dot(PSL_TO_RAS, aff)
 
     def get_data_shape_in_file(self):
         """Return the shape of the binary blob in the REC file.
@@ -530,7 +530,7 @@ class PARRECHeader(Header):
         Returns
         -------
         n_inplaneX : int
-            number of voxels in Y direction
+            number of voxels in X direction
         n_inplaneY : int
             number of voxels in Y direction
         n_slices : int

@@ -59,15 +59,20 @@ file above::
 Orientation
 ###########
 
-PAR files refer to orientations "ap", "fh" and "rl". These appear to correspond
-to NIfTI output axes like this:
+PAR files refer to orientations "ap", "fh" and "rl".
 
-* ap = anterior -> posterior = NIfTI negative Y
-* fh = foot -> head = NIfTI Z
-* fl = right -> left = NIfTI negative X
+Nibabel's required affine output axes are RAS (left to Right, posterior to
+Anterior, inferior to Superior). The correspondence of PAR's axes to RAS axes
+is:
+
+* ap = anterior -> posterior = negative R in RAS
+* fh = foot -> head = S in RAS
+* fl = right -> left = negative A in RAS
 
 The orientation of the PAR axes corresponds to DICOM's LPS coordinate system
 (right to Left, anterior to Posterior, inferior to Superior).
+
+We might call PAR's orientation "PSL" (Posterior, Superior, Left)
 """
 from __future__ import print_function, division
 
@@ -82,6 +87,9 @@ from .spatialimages import SpatialImage, Header
 from .eulerangles import euler2mat
 from .volumeutils import Recoder, array_from_file, apply_read_scaling
 from .arrayproxy import ArrayProxy
+
+# LPS to RAS affine
+LPS_TO_RAS = np.diag([-1, -1, 1, 1])
 
 # PAR header versions we claim to understand
 supported_versions = ['V4.2']
@@ -439,97 +447,82 @@ class PARRECHeader(Header):
         Returns
         -------
         aff : (4, 4) array
-            4x4 array, with output axis order corresponding to (x,y,z) or (lr,
-            pa, fh).
+            4x4 array, with output axis order corresponding to RAS or (x,y,z)
+            or (lr, pa, fh).
+
+        Notes
+        -----
+        Transformations appear to be specified in (ap, fh, rl) axes.  The
+        orientation of data is recorded in the "slice orientation" field of the
+        PAR header "General Information".
+
+        We first specify the reordering of the data to LPS using a permutation
+        3 x 3.  Then we calculate the rotation of the data using the rotation
+        angles. The voxel sizes give the scaling. The combination of
+        (permutation then scaling then rotation) gives the 3x3 part of the
+        affine.
         """
-        # hdr has deg, we need radian
-        # order is [ap, fh, rl]
-        ang_rad = self.general_info['angulation'] * np.pi / 180.0
-        # need to rotate back from what was given in the file
-        ang_rad *= -1
-
-        # R2AGUI approach is this, but it comes with remarks ;-)
-        # % trying to incorporate AP FH RL rotation angles: determined using some 
-        # % common sense, Chris Rordon's help + source code and trial and error, 
-        # % this is considered EXPERIMENTAL!
-        rot_rl = np.mat(
-                [[1.0, 0.0, 0.0],
-                 [0.0, np.cos(ang_rad[2]), -np.sin(ang_rad[2])],
-                 [0.0, np.sin(ang_rad[2]), np.cos(ang_rad[2])]]
-                )
-        rot_ap = np.mat(
-                [[np.cos(ang_rad[0]), 0.0, np.sin(ang_rad[0])],
-                 [0.0, 1.0, 0.0],
-                 [-np.sin(ang_rad[0]), 0.0, np.cos(ang_rad[0])]]
-                )
-        rot_fh = np.mat(
-                [[np.cos(ang_rad[1]), -np.sin(ang_rad[1]), 0.0],
-                 [np.sin(ang_rad[1]), np.cos(ang_rad[1]), 0.0],
-                 [0.0, 0.0, 1.0]]
-                )
-        rot_r2agui = rot_rl * rot_ap * rot_fh
-        # NiBabel way of doing it
-        # order is [ap, fh, rl]
-        #           x   y   z
-        #           0   1   2
-        # euler2mat does rotation around z, y, x axes in that order
-        rot_nibabel = euler2mat(ang_rad[1], ang_rad[0], ang_rad[2])
-
-        # XXX for now put some safety net, until we have recorded proper
-        # test data with oblique orientations and different readout directions
-        # to verify the order of arguments of euler2mat
-        assert(np.all(rot_r2agui == rot_nibabel))
-        rot = rot_nibabel
-
         slice_orientation = self.get_slice_orientation()
         if slice_orientation == 'sagittal':
-            # inplane: AP, FH   slices: RL
-            recfg_data_axis = np.mat([[  0,  0,  1],
-                                      [ -1,  0,  0],
-                                      [  0, -1,  0]])
+            # inplane: AP, FH, slices: RL
+            lps_permute = np.array([[  0,  0,  1],
+                                    [  1,  0,  0],
+                                    [  0,  1,  0]])
         elif slice_orientation == 'transverse':
-            # inplane: RL, AP   slices: FH
-            recfg_data_axis = np.mat([[ -1,  0,  0],
-                                      [  0, -1,  0],
-                                      [  0,  0,  1]])
+            # inplane: RL, AP, slices: FH
+            lps_permute = np.array([[  1,  0,  0],
+                                    [  0,  1,  0],
+                                    [  0,  0,  1]])
         elif slice_orientation == 'coronal':
-            # inplane: RL, FH   slices: AP
-            recfg_data_axis = np.mat([[ -1,  0,  0],
-                                      [  0,  0, -1],
-                                      [  0, -1,  0]])
+            # inplane: RL, FH, slices: AP
+            lps_permute = np.array([[  1,  0,  0],
+                                    [  0,  0,  1],
+                                    [  0,  1,  0]])
         else:
             raise PARRECError("Unknown slice orientation (%s)."
                               % slice_orientation)
-
-        # full rotation is reflections followed by rotations
-        full_rot = rot * recfg_data_axis
-
-        # ijk origin should be: Anterior, Right, Foot
-        # qform should point to the center of the voxel 0, 0, 0
-        vox_fov = np.multiply(
-            np.subtract(self.get_data_shape(), 1), # mid-vox to mid-vox
-            self.get_zooms())
-        fov_center_offset = -vox_fov[:3] / 2.0
-
-        # need to rotate this offset into scanner space
-        fov_center_offset = np.dot(full_rot, fov_center_offset)
-
-        # get the scaling by voxelsize and slice thickness (incl. gap)
-        scaled = full_rot * np.mat(np.diag(self.get_zooms()[:3]))
-
+        # ap_fh_rl (PSL) to LPS
+        PSL_TO_LPS = np.array([[  0,  0,  1],
+                               [  1,  0,  0],
+                               [  0,  1,  0]])
+        # hdr has deg, we need radians
+        ang_rad = self.general_info['angulation'] * np.pi / 180.0
+        # Order is [ap, fh, rl]; -> LPS
+        ang_rad = PSL_TO_LPS.dot(ang_rad)
+        # R2AGUI approach is this, but it comes with remarks ;-)
+        # % trying to incorporate AP FH RL rotation angles: determined using some
+        # % common sense, Chris Rordon's help + source code and trial and error,
+        # % this is considered EXPERIMENTAL!
+        # We're doing the same thing as r2agui using euler2mat
+        # euler2mat accepts x, y, z angles and does rotation around z, y, x
+        # axes in that order. It's more than possible that PAR assumes rotation
+        # in a different order, perhaps y then z then x (PSL order).  We need
+        # some relevant data to test this
+        x_rot, y_rot, z_rot = [euler2mat(*row) for row in np.diag(ang_rad)]
+        rot = np.dot(x_rot, np.dot(y_rot, z_rot))
+        # ijk origin should be coordinate of 0, 0, 0 voxel
+        # qform should point to the center of the voxel
+        # shape, zooms already in LPS == RAS order
+        lps_shape = np.array(self.get_data_shape()[:3])
+        lps_zooms = np.array(self.get_zooms()[:3])
+        vox_fov = (lps_shape - 1) * lps_zooms # mid-vox to mid-vox FOV
+        fov_center_offset = -vox_fov / 2.0
+        # need to rotate this offset into LPS
+        fov_center_offset = np.dot(rot, fov_center_offset)
         # compose the affine
         aff = np.eye(4)
-        aff[:3,:3] = scaled
-        # offset
+        # get the 3x3 part by LPS permutation then scaling with voxelsize then
+        # rotation
+        aff[:3,:3] = np.dot(rot, np.dot(np.diag(lps_zooms), lps_permute))
+        # Coordinate of 0, 0, 0 voxel is translation part of affine
         aff[:3,3] = fov_center_offset
-        if origin == 'fov':
-            pass
-        elif origin == 'scanner':
+        if origin == 'scanner':
             # offset to scanner's iso center (always in ap, fh, rl)
-            # -- turn into rl, ap, fh and then lr, pa, fh
-            iso_offset = self.general_info['off_center'][[2,0,1]] * [-1,-1,1]
+            # -- turn into rl, ap, fh
+            iso_offset = PSL_TO_LPS.dot(self.general_info['off_center'])
             aff[:3,3] += iso_offset
-        return aff
+        # Currently in LPS; apply LPS -> RAS
+        return np.dot(LPS_TO_RAS, aff)
 
     def get_data_shape_in_file(self):
         """Return the shape of the binary blob in the REC file.

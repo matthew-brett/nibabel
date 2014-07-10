@@ -481,48 +481,41 @@ class PARRECHeader(Header):
         assert(np.all(rot_r2agui == rot_nibabel))
         rot = rot_nibabel
 
-        # FOV (always in ap, fh, rl)
-        fov = self.general_info['fov']
-        # voxel size always (inplaneX, inplaneY, slicethickness (without gap))
-        voxsize = self.get_voxel_size()
-
         slice_orientation = self.get_slice_orientation()
         if slice_orientation == 'sagittal':
             # inplane: AP, FH   slices: RL
             recfg_data_axis = np.mat([[  0,  0,  1],
                                       [ -1,  0,  0],
                                       [  0, -1,  0]])
-            # fov is already like the data
-            fov = fov
         elif slice_orientation == 'transverse':
             # inplane: RL, AP   slices: FH
             recfg_data_axis = np.mat([[ -1,  0,  0],
                                       [  0, -1,  0],
                                       [  0,  0,  1]])
-            # fov is already like the data
-            fov = fov[[2,0,1]]
         elif slice_orientation == 'coronal':
             # inplane: RL, FH   slices: AP
             recfg_data_axis = np.mat([[ -1,  0,  0],
                                       [  0,  0, -1],
                                       [  0, -1,  0]])
-            # fov is already like the data
-            fov = fov[[2,1,0]]
         else:
             raise PARRECError("Unknown slice orientation (%s)."
                               % slice_orientation)
 
-        rot = rot * recfg_data_axis
+        # full rotation is reflections followed by rotations
+        full_rot = rot * recfg_data_axis
 
         # ijk origin should be: Anterior, Right, Foot
-        # qform should point to the center of the voxel
-        fov_center_offset = self.get_voxel_size() / 2 - fov / 2
+        # qform should point to the center of the voxel 0, 0, 0
+        vox_fov = np.multiply(
+            np.subtract(self.get_data_shape(), 1), # mid-vox to mid-vox
+            self.get_zooms())
+        fov_center_offset = -vox_fov[:3] / 2.0
 
         # need to rotate this offset into scanner space
-        fov_center_offset = np.dot(rot, fov_center_offset)
+        fov_center_offset = np.dot(full_rot, fov_center_offset)
 
         # get the scaling by voxelsize and slice thickness (incl. gap)
-        scaled = rot * np.mat(np.diag(self.get_zooms()[:3]))
+        scaled = full_rot * np.mat(np.diag(self.get_zooms()[:3]))
 
         # compose the affine
         aff = np.eye(4)

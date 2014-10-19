@@ -32,9 +32,7 @@ before_install:
       fi
     # We install system matplotlib here to ensure we have the libs we need
     - if [ "${DEPS}" != "minimal" ]; then
-      travis_retry sudo apt-get install gcc gfortran python-dev libblas-dev liblapack-dev cython libatlas-base-dev;
       pip install matplotlib;
-      pip install scipy;
       fi;
 
 install:

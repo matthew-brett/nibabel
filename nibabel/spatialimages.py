@@ -716,20 +716,18 @@ class SpatialImage(object):
                      klass.header_class.from_header(img.header),
                      extra=img.extra.copy())
 
-    def plot(self, show=True):
+    def plot(self):
         """Plot the image using OrthoSlicer3D
-
-        Parameters
-        ----------
-        show : bool
-            If True, the viewer will be shown.
 
         Returns
         -------
         viewer : instance of OrthoSlicer3D
             The viewer.
+
+        Notes
+        -----
+        This requires matplotlib. If a non-interactive backend is used,
+        consider using viewer.show() (equivalently plt.show()) to show
+        the figure.
         """
-        out = OrthoSlicer3D(self.get_data())
-        if show:
-            out.show()
-        return out
+        return OrthoSlicer3D(self.get_data())

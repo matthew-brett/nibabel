@@ -14,11 +14,11 @@
 
 .. nibabel
 .. _nibabel: http://nipy.org/nibabel
-.. _`nibabel github`: http://github.com/nipy/nibabel
-.. _`nibabel mailing list`: http://mail.scipy.org/mailman/listinfo/nipy-devel
-.. _nibabel pypi: http://pypi.python.org/pypi/nibabel
-.. _nibabel issues: http://github.com/nipy/nibabel/issues
-.. _nibabel github issues: http://github.com/nipy/nibabel/issues
+.. _`nibabel github`: https://github.com/nipy/nibabel
+.. _`nibabel mailing list`: https://mail.python.org/mailman/listinfo/neuroimaging
+.. _nibabel pypi: https://pypi.python.org/pypi/nibabel
+.. _nibabel issues: https://github.com/nipy/nibabel/issues
+.. _nibabel github issues: https://github.com/nipy/nibabel/issues
 .. _nibabel wiki: https://github.com/nipy/nibabel.wiki
 
 .. other related projects
@@ -62,10 +62,10 @@
 .. _sourceforge: http://nipy.sourceforge.net/
 .. _`nipy launchpad`: https://launchpad.net/nipy
 .. _launchpad: https://launchpad.net/
-.. _`nipy trunk`: http://code.launchpad.net/~nipy-developers/nipy/trunk
-.. _`nipy mailing list`: http://projects.scipy.org/mailman/listinfo/nipy-devel
-.. _`nipy bugs`: https://bugs.launchpad.net/nipy
-.. _sourceforge download page: http://sourceforge.net/projects/nipy/files
+.. _`nipy trunk`: https://github.com/nipy/nipy/tree/master
+.. _`nipy mailing list`: https://mail.python.org/mailman/listinfo/neuroimaging
+.. _`nipy bugs`: https://github.com/nipy/nipy/issues
+.. _sourceforge download page: https://github.com/nipy/nipy/releases
 
 .. Code support stuff
 .. _pychecker: http://pychecker.sourceforge.net/

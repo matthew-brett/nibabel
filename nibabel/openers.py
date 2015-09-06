@@ -183,5 +183,6 @@ class ImageOpener(Opener):
             assert ext not in opener_klass.compress_ext_map, \
                 "Cannot redefine extension-function mappings."
             opener_klass.compress_ext_map[ext] = func_def
+            klass.alternate_exts += (ext,)
             return klass
         return decorate

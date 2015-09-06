@@ -90,6 +90,7 @@ def test_BinOpener():
                       BinOpener, 'test.txt', 'r')
 
 class TestImageOpener:
+    alternate_exts = ()
     def setUp(self):
         self.compress_ext_map = ImageOpener.compress_ext_map.copy()
 

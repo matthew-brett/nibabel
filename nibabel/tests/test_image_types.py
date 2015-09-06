@@ -21,7 +21,7 @@ from .. import (Nifti1Image, Nifti1Header, Nifti1Pair,
                 Spm2AnalyzeImage, Spm99AnalyzeImage,
                 MGHImage, all_image_classes)
 
-from nose.tools import assert_true, assert_equal, assert_raises
+from nose.tools import assert_true, assert_raises
 
 DATA_PATH = pjoin(dirname(__file__), 'data')
 
@@ -53,10 +53,10 @@ def test_sniff_and_guessed_image_type(img_klasses=all_image_classes):
 
             if sniff_mode == 'no_sniff':
                 # Don't pass any sniff--not even "None"
-                is_img, new_sniff = img_klass.is_image(img_path)
+                is_img, new_sniff = img_klass.path_maybe_image(img_path)
             else:
                 # Pass a sniff, but don't reuse across images.
-                is_img, new_sniff = img_klass.is_image(img_path, sniff)
+                is_img, new_sniff = img_klass.path_maybe_image(img_path, sniff)
 
             if expect_success:
                 # Check that the sniff returned is appropriate.

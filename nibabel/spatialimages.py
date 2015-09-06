@@ -325,7 +325,7 @@ class SpatialImage(object):
     ''' Template class for images '''
     header_class = Header
     files_types = (('image', None),)
-    alternate_exts = ()
+    alternate_exts = ()  # Modified by @ImageOpener.register_ext_from_image
     _compressed_exts = ()
 
     makeable = True  # Used in test code

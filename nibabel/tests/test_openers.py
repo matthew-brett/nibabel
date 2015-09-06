@@ -116,6 +116,7 @@ class TestImageOpener:
         dec(self.__class__)
         assert_equal(n_associations + 1, len(ImageOpener.compress_ext_map))
         assert_true('.foo' in ImageOpener.compress_ext_map)
+        assert_true('.foo' in self.alternate_exts)
 
         with InTemporaryDirectory():
             with ImageOpener('test.foo', 'w'):

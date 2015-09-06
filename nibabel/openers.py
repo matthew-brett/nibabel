@@ -160,7 +160,9 @@ class ImageOpener(Opener):
     def register_ext_from_image(opener_klass, ext, func_def):
         """Decorator for adding extension / opener_function associations.
 
-        Should be used to decorate classes.
+        Should be used to decorate classes. Updates ImageOpener class with
+        desired extension / opener association. Updates decorated class by
+        adding ```ext``` to ```klass.alternate_exts```.
 
         Parameters
         ----------
@@ -176,8 +178,7 @@ class ImageOpener(Opener):
 
         Returns
         -------
-        opener_klass, with a side-effect of updating the ImageOpener class
-        with the desired extension / opener association.
+        opener_klass
         """
         def decorate(klass):
             assert ext not in opener_klass.compress_ext_map, \

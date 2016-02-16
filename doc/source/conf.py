@@ -252,7 +252,11 @@ latex_documents = [
 #latex_use_parts = False
 
 # Additional stuff for the LaTeX preamble.
-#latex_preamble = ''
+# Add enumitem to allow deeply-nested lists
+latex_preamble = """
+\usepackage{enumitem}
+\setlistdepth{99}
+"""
 
 # Documents to append as an appendix to all manuals.
 #latex_appendices = []

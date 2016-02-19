@@ -14,7 +14,6 @@ import os
 import sys
 import warnings
 from os.path import dirname, abspath, join as pjoin
-from nibabel.externals.six.moves import zip_longest
 
 import numpy as np
 from numpy.testing import assert_array_equal
@@ -26,6 +25,8 @@ try:
                             assert_true, assert_false, assert_raises)
 except ImportError:
     pass
+
+from nibabel.externals.six.moves import zip_longest
 
 # set path to example data
 data_path = abspath(pjoin(dirname(__file__), '..', 'tests', 'data'))
@@ -62,6 +63,22 @@ def assert_allclose_safely(a, b, match_nans=True):
     assert_true(np.allclose(a, b))
 
 
+def check_iteration(iterable):
+    """ Checks that an object can be iterated through without errors. """
+    try:
+        for _ in iterable:
+            pass
+    except:
+        return False
+
+    return True
+
+
+def assert_arrays_equal(arrays1, arrays2):
+    for arr1, arr2 in zip_longest(arrays1, arrays2, fillvalue=None):
+        assert_array_equal(arr1, arr2)
+
+
 def assert_re_in(regex, c, flags=0):
     """Assert that container (list, str, etc) contains entry matching the regex
     """
@@ -71,7 +88,6 @@ def assert_re_in(regex, c, flags=0):
         if re.match(regex, e, flags=flags):
             return
     raise AssertionError("Not a single entry matched %r in %r" % (regex, c))
-
 
 
 def get_fresh_mod(mod_name=__name__):
@@ -177,7 +193,17 @@ class suppress_warnings(error_warnings):
 
 
 class catch_warn_reset(clear_and_catch_warnings):
+
     def __init__(self, *args, **kwargs):
         warnings.warn('catch_warn_reset is deprecated and will be removed in '
                       'nibabel v3.0; use nibabel.testing.clear_and_catch_warnings.',
                       FutureWarning)
+
+
+EXTRA_SET = os.environ.get('NIPY_EXTRA_TESTS', '').split(',')
+
+
+def runif_extra_has(test_str):
+    """Decorator checks to see if NIPY_EXTRA_TESTS env var contains test_str"""
+    return skipif(test_str not in EXTRA_SET,
+                  "Skip {0} tests.".format(test_str))

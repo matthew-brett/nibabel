@@ -16,13 +16,14 @@ import numpy.linalg as npl
 from ..optpkg import optional_package
 spnd, have_scipy, _ = optional_package('scipy.ndimage')
 
-from ..processing import (sigma2fwhm, fwhm2sigma, adapt_affine,
-                          resample_from_to, resample_to_output, smooth_image)
-from ..nifti1 import Nifti1Image
-from ..nifti2 import Nifti2Image
-from ..orientations import flip_axis, inv_ornt_aff
-from ..affines import AffineError, from_matvec, to_matvec
-from ..eulerangles import euler2mat
+import nibabel as nib
+from nibabel.processing import (sigma2fwhm, fwhm2sigma, adapt_affine,
+                                resample_from_to, resample_to_output, smooth_image)
+from nibabel.nifti1 import Nifti1Image
+from nibabel.nifti2 import Nifti2Image
+from nibabel.orientations import flip_axis, inv_ornt_aff
+from nibabel.affines import AffineError, from_matvec, to_matvec
+from nibabel.eulerangles import euler2mat
 
 from numpy.testing import (assert_almost_equal,
                            assert_array_equal)

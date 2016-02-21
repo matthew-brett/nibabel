@@ -348,15 +348,15 @@ def test_against_spm_resample():
     raw_func = nib.load(pjoin(DATA_DIR, 'functional.nii'))
     some_rotations = euler2mat(0.1, 0.2, 0.3)
     extra_affine = from_matvec(some_rotations, [3, 4, 5])
-    moved_anat = nib.NiftiImage(raw_anat.dataobj,
-                                extra_affine.dot(raw_anat.affine),
-                                raw_anat.header())
+    moved_anat = nib.Nifti1Image(raw_anat.get_data().astype(float),
+                                 extra_affine.dot(raw_anat.affine),
+                                 raw_anat.header)
     one_functional = nib.Nifti1Image(raw_func.dataobj[..., 0],
                                      raw_func.affine,
                                      raw_func.header)
     moved2func1 = resample_from_to(moved_anat, one_functional)
-    spm_moved = nib.load(pjoin(DATA_DIR, 'anat_moved_by_spm.nii'))
-    assert_almost_equal(moved2func1.dataobj, spm_moved.dataobj)
+    spm_moved = nib.load(pjoin(DATA_DIR, 'ranat_moved.nii'))
+    assert_true(np.allclose(moved2func1.dataobj, spm_moved.dataobj))
     assert_almost_equal(moved2func1.affine, spm_moved.affine)
     # Next we reslice the rotated anatomical image to output space, and compare
     # to the same operation done with SPM ('reorient.m') by John Ashburner

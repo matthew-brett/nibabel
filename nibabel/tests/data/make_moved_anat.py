@@ -13,7 +13,8 @@ from nibabel.affines import from_matvec
 img = nib.load('anatomical.nii')
 some_rotations = euler2mat(0.1, 0.2, 0.3)
 extra_affine = from_matvec(some_rotations, [3, 4, 5])
-mean_img_moved = nib.Nifti1Image(img.dataobj,
-                                 extra_affine.dot(img.affine),
-                                 img.header)
-nib.save(mean_img_moved, 'anat_moved.nii')
+moved_anat = nib.Nifti1Image(img.dataobj,
+                            extra_affine.dot(img.affine),
+                            img.header)
+moved_anat.set_data_dtype(float)
+nib.save(moved_anat, 'anat_moved.nii')

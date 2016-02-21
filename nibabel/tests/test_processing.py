@@ -10,6 +10,8 @@
 """
 from __future__ import division, print_function
 
+from os.path import dirname, join as pjoin
+
 import numpy as np
 import numpy.linalg as npl
 
@@ -36,6 +38,7 @@ from .test_spaces import assert_all_in, get_outspace_params
 
 needs_scipy = skipif(not have_scipy, 'These tests need scipy')
 
+DATA_DIR = pjoin(dirname(__file__), 'data')
 
 def test_sigma2fwhm():
     # Test from constant
@@ -332,3 +335,32 @@ def test_smooth_image():
     assert_equal(
         smooth_image(img_ni2, 0, out_class=None).__class__,
         Nifti2Image)
+
+
+def test_against_spm_resample():
+    # Test resampling against images resample with SPM12
+    # anatomical.nii has a diagonal -2, 2 2 affine;
+    # functional.nii has a diagonal -4, 4 4 affine;
+    # These are a bit boring, so first add some rotations and translations to
+    # the anatomical image affine, and then resample to the first volume in the
+    # functional, and compare to the same thing in SPM.
+    raw_anat = nib.load(pjoin(DATA_DIR, 'anatomical.nii'))
+    raw_func = nib.load(pjoin(DATA_DIR, 'functional.nii'))
+    some_rotations = euler2mat(0.1, 0.2, 0.3)
+    extra_affine = from_matvec(some_rotations, [3, 4, 5])
+    moved_anat = nib.NiftiImage(raw_anat.dataobj,
+                                extra_affine.dot(raw_anat.affine),
+                                raw_anat.header())
+    one_functional = nib.Nifti1Image(raw_func.dataobj[..., 0],
+                                     raw_func.affine,
+                                     raw_func.header)
+    moved2func1 = resample_from_to(moved_anat, one_functional)
+    spm_moved = nib.load(pjoin(DATA_DIR, 'anat_moved_by_spm.nii'))
+    assert_almost_equal(moved2func1.dataobj, spm_moved.dataobj)
+    assert_almost_equal(moved2func1.affine, spm_moved.affine)
+    # Next we reslice the rotated anatomical image to output space, and compare
+    # to the same operation done with SPM ('reorient.m') by John Ashburner
+    moved2output = resample_to_output(moved_anat)
+    spm2output = nib.load(pjoin(DATA_DIR, 'anat_output_by_spm.nii'))
+    assert_almost_equal(moved2output.dataobj, spm2output.dataobj)
+    assert_almost_equal(moved2output.affine, spm2output.affine)

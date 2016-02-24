@@ -338,6 +338,28 @@ def test_smooth_image():
         Nifti2Image)
 
 
+def assert_spm_resampling_same(from_img, our_resampled, spm_resampled):
+    """ Assert that our resampling is same as SPM, allowing for edge effects
+    """
+    # To allow for differences in the way SPM and scipy.ndimage handle off-edge
+    # interpolation, mask out voxels off edge
+    to_img_shape = spm_resampled.shape
+    to_img_affine = spm_resampled.affine
+    to_vox_coords = np.indices(to_img_shape).transpose((1, 2, 3, 0))
+    # Coordinates of to_img mapped to from_img
+    to_to_from = npl.inv(from_img.affine).dot(to_img_affine)
+    resamp_coords = apply_affine(to_to_from, to_vox_coords)
+    # Places where SPM may not return default value but scipy.ndimage will (SPM
+    # does not return zeros <0.05 from image edges).
+    # See: https://github.com/nipy/nibabel/pull/255#issuecomment-186774173
+    outside_vol = np.any((resamp_coords < 0) |
+                         (np.subtract(resamp_coords, from_img.shape) > -1),
+                         axis=-1)
+    spm_res = np.where(outside_vol, np.nan, np.array(spm_resampled.dataobj))
+    assert_allclose_safely(our_resliced.dataobj, spm_res, rtol=1e-4, atol=1e-5)
+    assert_almost_equal(our_resliced.affine, spm_resliced.affine)
+
+
 def test_against_spm_resample():
     # Test resampling against images resampled with SPM12
     # anatomical.nii has a diagonal -2, 2 2 affine;
@@ -345,37 +367,21 @@ def test_against_spm_resample():
     # These are a bit boring, so first add some rotations and translations to
     # the anatomical image affine, and then resample to the first volume in the
     # functional, and compare to the same thing in SPM.
-    raw_anat = nib.load(pjoin(DATA_DIR, 'anatomical.nii'))
+    anat = nib.load(pjoin(DATA_DIR, 'anatomical.nii'))
     raw_func = nib.load(pjoin(DATA_DIR, 'functional.nii'))
     some_rotations = euler2mat(0.1, 0.2, 0.3)
     extra_affine = from_matvec(some_rotations, [3, 4, 5])
-    moved_anat = nib.Nifti1Image(raw_anat.get_data().astype(float),
-                                 extra_affine.dot(raw_anat.affine),
-                                 raw_anat.header)
-    one_functional = nib.Nifti1Image(raw_func.dataobj[..., 0],
-                                     raw_func.affine,
-                                     raw_func.header)
-    moved2func1 = resample_from_to(moved_anat, one_functional,
+    moved_func = nib.Nifti1Image(raw_func.get_data().astype(float),
+                                 extra_affine.dot(raw_func.affine),
+                                 anat.header)
+    moved2anat = resample_from_to(moved_func, anat,
                                    mode='constant', cval=np.nan)
-    spm_moved = nib.load(pjoin(DATA_DIR, 'ranat_moved.nii'))
-    # To allow for differences in the way SPM and scipy.ndimage handle off-edge
-    # interpolation, mask out voxels off edge
-    func_vox_coords = np.indices(one_functional.shape).transpose((1, 2, 3, 0))
-    # Coordinates of to_img mapped to from_img
-    func_to_anat = npl.inv(moved_anat.affine).dot(one_functional.affine)
-    resamp_coords = apply_affine(func_to_anat, func_vox_coords)
-    # Places where SPM may not return zero but ndimage will (SPM does not
-    # return zeros <0.05 from image edges)
-    # See: https://github.com/nipy/nibabel/pull/255#issuecomment-186774173
-    outside_vol = np.any((resamp_coords < 0) |
-                         (np.subtract(resamp_coords, moved_anat.shape) > -1),
-                         axis=-1)
-    spm_res = np.where(outside_vol, np.nan, np.array(spm_moved.dataobj))
-    assert_allclose_safely(moved2func1.dataobj, spm_res, rtol=1e-4, atol=1e-5)
-    assert_almost_equal(moved2func1.affine, spm_moved.affine)
+    spm_moved = nib.load(pjoin(DATA_DIR, 'resliced_func_moved.nii'))
+    assert_spm_resampling_same(anat, moved_func, moved2anat, spm_moved)
     # Next we reslice the rotated anatomical image to output space, and compare
     # to the same operation done with SPM ('reorient.m') by John Ashburner
-    moved2output = resample_to_output(moved_anat)
-    spm2output = nib.load(pjoin(DATA_DIR, 'anat_output_by_spm.nii'))
+    moved2output = resample_to_output(moved_func)
+    spm2output = nib.load(pjoin(DATA_DIR, 'r_func_moved.nii'))
+    assert_spm_resampling_same(anat, moved_func, moved2anat, spm_moved)
     assert_almost_equal(moved2output.dataobj, spm2output.dataobj)
     assert_almost_equal(moved2output.affine, spm2output.affine)

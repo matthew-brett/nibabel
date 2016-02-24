@@ -6,6 +6,8 @@
 See ``resample_using_spm.m`` for processing of this generated image by SPM.
 """
 
+import numpy as np
+
 import nibabel as nib
 from nibabel.eulerangles import euler2mat
 from nibabel.affines import from_matvec
@@ -16,5 +18,5 @@ extra_affine = from_matvec(some_rotations, [3, 4, 5])
 moved_anat = nib.Nifti1Image(img.dataobj,
                             extra_affine.dot(img.affine),
                             img.header)
-moved_anat.set_data_dtype(float)
+moved_anat.set_data_dtype(np.float32)
 nib.save(moved_anat, 'func_moved.nii')

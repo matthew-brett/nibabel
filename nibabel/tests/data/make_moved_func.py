@@ -1,4 +1,4 @@
-""" Make anatomical image with altered affine
+""" Make functional image with altered affine
 
 * Add some rotations and translations to affine;
 * Save as ``.nii`` file so SPM can read it.
@@ -10,11 +10,11 @@ import nibabel as nib
 from nibabel.eulerangles import euler2mat
 from nibabel.affines import from_matvec
 
-img = nib.load('anatomical.nii')
+img = nib.load('functional.nii')
 some_rotations = euler2mat(0.1, 0.2, 0.3)
 extra_affine = from_matvec(some_rotations, [3, 4, 5])
 moved_anat = nib.Nifti1Image(img.dataobj,
                             extra_affine.dot(img.affine),
                             img.header)
 moved_anat.set_data_dtype(float)
-nib.save(moved_anat, 'anat_moved.nii')
+nib.save(moved_anat, 'func_moved.nii')

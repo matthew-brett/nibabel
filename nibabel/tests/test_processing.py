@@ -15,7 +15,7 @@ from os.path import dirname, join as pjoin
 import numpy as np
 import numpy.linalg as npl
 
-from ..optpkg import optional_package
+from nibabel.optpkg import optional_package
 spnd, have_scipy, _ = optional_package('scipy.ndimage')
 
 import nibabel as nib
@@ -24,7 +24,7 @@ from nibabel.processing import (sigma2fwhm, fwhm2sigma, adapt_affine,
 from nibabel.nifti1 import Nifti1Image
 from nibabel.nifti2 import Nifti2Image
 from nibabel.orientations import flip_axis, inv_ornt_aff
-from nibabel.affines import AffineError, from_matvec, to_matvec
+from nibabel.affines import AffineError, from_matvec, to_matvec, apply_affine
 from nibabel.eulerangles import euler2mat
 
 from numpy.testing import (assert_almost_equal,
@@ -34,7 +34,8 @@ from numpy.testing.decorators import skipif
 from nose.tools import (assert_true, assert_false, assert_raises,
                         assert_equal, assert_not_equal)
 
-from .test_spaces import assert_all_in, get_outspace_params
+from nibabel.tests.test_spaces import assert_all_in, get_outspace_params
+from nibabel.testing import assert_allclose_safely
 
 needs_scipy = skipif(not have_scipy, 'These tests need scipy')
 
@@ -338,7 +339,7 @@ def test_smooth_image():
 
 
 def test_against_spm_resample():
-    # Test resampling against images resample with SPM12
+    # Test resampling against images resampled with SPM12
     # anatomical.nii has a diagonal -2, 2 2 affine;
     # functional.nii has a diagonal -4, 4 4 affine;
     # These are a bit boring, so first add some rotations and translations to
@@ -354,9 +355,23 @@ def test_against_spm_resample():
     one_functional = nib.Nifti1Image(raw_func.dataobj[..., 0],
                                      raw_func.affine,
                                      raw_func.header)
-    moved2func1 = resample_from_to(moved_anat, one_functional)
+    moved2func1 = resample_from_to(moved_anat, one_functional,
+                                   mode='constant', cval=np.nan)
     spm_moved = nib.load(pjoin(DATA_DIR, 'ranat_moved.nii'))
-    assert_true(np.allclose(moved2func1.dataobj, spm_moved.dataobj))
+    # To allow for differences in the way SPM and scipy.ndimage handle off-edge
+    # interpolation, mask out voxels off edge
+    func_vox_coords = np.indices(one_functional.shape).transpose((1, 2, 3, 0))
+    # Coordinates of to_img mapped to from_img
+    func_to_anat = npl.inv(moved_anat.affine).dot(one_functional.affine)
+    resamp_coords = apply_affine(func_to_anat, func_vox_coords)
+    # Places where SPM may not return zero but ndimage will (SPM does not
+    # return zeros <0.05 from image edges)
+    # See: https://github.com/nipy/nibabel/pull/255#issuecomment-186774173
+    outside_vol = np.any((resamp_coords < 0) |
+                         (np.subtract(resamp_coords, moved_anat.shape) > -1),
+                         axis=-1)
+    spm_res = np.where(outside_vol, np.nan, np.array(spm_moved.dataobj))
+    assert_allclose_safely(moved2func1.dataobj, spm_res, rtol=1e-4, atol=1e-5)
     assert_almost_equal(moved2func1.affine, spm_moved.affine)
     # Next we reslice the rotated anatomical image to output space, and compare
     # to the same operation done with SPM ('reorient.m') by John Ashburner

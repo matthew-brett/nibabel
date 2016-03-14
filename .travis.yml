@@ -22,7 +22,6 @@ env:
     global:
         - DEPENDS="numpy scipy matplotlib h5py"
         - PYDICOM=1
-        - INSTALL_TYPE="setup"
 python:
     - 2.6
     - 3.3
@@ -53,15 +52,22 @@ matrix:
     - python: 2.7
       env:
         - DOC_DOC_TEST=1
+    # Setup.py install
+    - python: 2.7
+      env:
+        - INSTALL_TYPE=setup
     - python: 2.7
       env:
         - INSTALL_TYPE=sdist
+        - DEPENDS="numpy==1.5.1"
     - python: 2.7
       env:
         - INSTALL_TYPE=wheel
+        - DEPENDS="numpy==1.5.1"
     - python: 2.7
       env:
         - INSTALL_TYPE=requirements
+        - DEPENDS=
     - python: 2.7
       env:
         - STYLE=1
@@ -69,13 +75,9 @@ matrix:
       env:
         - STYLE=1
 before_install:
-    - source tools/travis_tools.sh
-    - virtualenv --python=python venv
-    - source venv/bin/activate
-    - python --version # just to check
-    - pip install -U pip wheel  # upgrade to latest pip find 3.5 wheels; wheel to avoid errors
-    - retry pip install nose flake8  # always
-    - wheelhouse_pip_install $EXTRA_PIP_FLAGS $DEPENDS
+    - source travis-tools/utils.sh
+    - travis_before_install
+    - pip install flake8
     # pydicom <= 0.9.8 doesn't install on python 3
     - if [ "${TRAVIS_PYTHON_VERSION:0:1}" == "2" ]; then
         if [ "$PYDICOM" == "1" ]; then
@@ -84,27 +86,9 @@ before_install:
             pip install git+https://github.com/darcymason/pydicom.git@43f278444d5cb2e4648135d3edcd430c363c6975;
         fi
       fi
-    - if [ "${COVERAGE}" == "1" ]; then
-      pip install coverage;
-      pip install coveralls;
-      fi
 # command to install dependencies
 install:
-    - |
-      if [ "$INSTALL_TYPE" == "setup" ]; then
-          python setup.py install
-      elif [ "$INSTALL_TYPE" == "sdist" ]; then
-          python setup_egg.py egg_info  # check egg_info while we're here
-          python setup_egg.py sdist
-          wheelhouse_pip_install $EXTRA_PIP_FLAGS dist/*.tar.gz
-      elif [ "$INSTALL_TYPE" == "wheel" ]; then
-          pip install wheel
-          python setup_egg.py bdist_wheel
-          wheelhouse_pip_install $EXTRA_PIP_FLAGS dist/*.whl
-      elif [ "$INSTALL_TYPE" == "requirements" ]; then
-          wheelhouse_pip_install $EXTRA_PIP_FLAGS -r requirements.txt
-          python setup.py install
-      fi
+    - travis_install $INSTALL_TYPE
     # Point to nibabel data directory
     - export NIBABEL_DATA_DIR="$PWD/nibabel-data"
 # command to run tests, e.g. python setup.py test
@@ -127,6 +111,7 @@ script:
               make html;
               make doctest;
           else
+              pip install nose
               nosetests --with-doctest $COVER_ARGS nibabel;
           fi
       fi

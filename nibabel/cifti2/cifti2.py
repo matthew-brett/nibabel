@@ -106,30 +106,15 @@ class Cifti2MetaData(xml.XmlSerializable):
         self.data = []
         self.add_metadata(nvpair)
 
-    def _add_remove_metadata(self, metadata, func):
-        pairs = []
-        if isinstance(metadata, dict):
-            pairs = metadata.items()
-        elif isinstance(metadata, (list, tuple)):
-            if not isinstance(metadata[0], string_types):
-                for item in metadata:
-                    self._add_remove_metadata(item, func)
-                return
-            elif len(metadata) == 2:
-                pairs = [tuple((metadata[0], metadata[1]))]
-            else:
+    def _check_nvpairs(self, metadata):
+        if hasattr(self, 'items'):
+            return self._check_nvpairs(self.items())
+        metadata = list(metadata)  # Raises error for non-sequence
+        if isinstance(metadata[0], string_types):
+            if len(metadata) != 2:
                 raise ValueError('nvpair must be a 2-list or 2-tuple')
-        else:
-            raise ValueError('nvpair input must be a list, tuple or dict')
-
-        for pair in pairs:
-            if func == 'add':
-                if pair not in self.data:
-                    self.data.append(pair)
-            elif func == 'remove':
-                self.data.remove(pair)
-            else:
-                raise ValueError('Unknown func %s' % func)
+            return [tuple(metadata)]
+        return sum([pair for pair in self._check_nvpairs(metadata)], [])
 
     def add_metadata(self, metadata):
         """Add metadata key-value pairs
@@ -150,12 +135,14 @@ class Cifti2MetaData(xml.XmlSerializable):
         """
         if metadata is None:
             return
-        self._add_remove_metadata(metadata, 'add')
+        for pair in self._check_nvpairs(metadata):
+            self.data.append(pair)
 
     def remove_metadata(self, metadata):
         if metadata is None:
             return
-        self._add_remove_metadata(metadata, 'remove')
+        for pair in self._check_nvpairs(metadata):
+            self.data.remove(pair)
 
     def _to_xml_element(self):
         metadata = xml.Element('MetaData')

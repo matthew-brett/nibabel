@@ -46,8 +46,8 @@ class ArraySequence(object):
         # Create new empty `ArraySequence` object.
         self._is_view = False
         self._data = np.array([])
-        self._offsets = np.array([], dtype=np.intp)
-        self._lengths = np.array([], dtype=np.intp)
+        self._offsets = []
+        self._lengths = []
 
         if iterable is None:
             return
@@ -127,8 +127,8 @@ class ArraySequence(object):
         size = (self._data.shape[0] + element.shape[0],) + element.shape[1:]
         self._data.resize(size)
         self._data[next_offset:] = element
-        self._offsets = np.r_[self._offsets, next_offset]
-        self._lengths = np.r_[self._lengths, element.shape[0]]
+        self._offsets.append(next_offset)
+        self._lengths.append(element.shape[0])
 
     def extend(self, elements):
         """ Appends all `elements` to this array sequence.
@@ -174,8 +174,8 @@ class ArraySequence(object):
             self._data[next_offset:next_offset + length] = chunk
             next_offset += length
 
-        self._lengths = np.r_[self._lengths, elements._lengths]
-        self._offsets = np.r_[self._offsets, offsets]
+        self._lengths += elements._lengths
+        self._offsets += offsets
 
     def _extend_using_coroutine(self, buffer_size=4):
         """ Creates a coroutine allowing to append elements.
@@ -232,8 +232,8 @@ class ArraySequence(object):
         except GeneratorExit:
             pass
 
-        self._offsets = np.r_[self._offsets, offsets].astype(np.intp)
-        self._lengths = np.r_[self._lengths, lengths].astype(np.intp)
+        self._offsets += offsets
+        self._lengths += lengths
 
         # Clear unused memory.
         self._data.resize((offset,) + self.common_shape)
@@ -265,8 +265,8 @@ class ArraySequence(object):
             seq._data[next_offset:next_offset + length] = chunk
             next_offset += length
 
-        seq._offsets = np.asarray(offsets)
-        seq._lengths = self._lengths.copy()
+        seq._offsets = offsets
+        seq._lengths = self._lengths[:]
 
         return seq
 
@@ -293,20 +293,24 @@ class ArraySequence(object):
             start = self._offsets[idx]
             return self._data[start:start + self._lengths[idx]]
 
-        elif isinstance(idx, (slice, list)) or is_ndarray_of_int_or_bool(idx):
-            seq = self.__class__()
+        seq = self.__class__()
+        seq._is_view = True
+        if isinstance(idx, tuple):
+            off_idx = idx[0]
+            seq._data = self._data.__getitem__((slice(None),) + idx[1:])
+        else:
+            off_idx = idx
             seq._data = self._data
-            seq._offsets = self._offsets[idx]
-            seq._lengths = self._lengths[idx]
-            seq._is_view = True
+
+        if isinstance(off_idx, slice):  # Standard list slicing
+            seq._offsets = self._offsets[off_idx]
+            seq._lengths = self._lengths[off_idx]
             return seq
 
-        elif isinstance(idx, tuple):
-            seq = self.__class__()
-            seq._data = self._data.__getitem__((slice(None),) + idx[1:])
-            seq._offsets = self._offsets[idx[0]]
-            seq._lengths = self._lengths[idx[0]]
-            seq._is_view = True
+        if isinstance(off_idx, list) or is_ndarray_of_int_or_bool(off_idx):
+            # Fancy indexing
+            seq._offsets = list(np.array(self._offsets)[off_idx])
+            seq._lengths = list(np.array(self._lengths)[off_idx])
             return seq
 
         raise TypeError("Index must be either an int, a slice, a list of int"

@@ -1,5 +1,12 @@
+from __future__ import division
+
 import numbers
+from operator import mul
+from functools import reduce
+
 import numpy as np
+
+MEGABYTE = 1024 * 1024
 
 
 def is_array_sequence(obj):
@@ -29,7 +36,7 @@ class ArraySequence(object):
     same for every ndarray.
     """
 
-    def __init__(self, iterable=None, buffer_size=4):
+    def __init__(self, iterable=None, buffer_size=1):
         """ Initialize array sequence instance
 
         Parameters
@@ -48,6 +55,8 @@ class ArraySequence(object):
         self._data = np.array([])
         self._offsets = []
         self._lengths = []
+        self._buffer_size = buffer_size
+        self._next_offset = None
 
         if iterable is None:
             return
@@ -60,16 +69,19 @@ class ArraySequence(object):
             self._is_view = True
             return
 
+        # If possible try pre-allocating memory.
         try:
-            # If possible try pre-allocating memory.
-            if len(iterable) > 0:
-                first_element = np.asarray(iterable[0])
-                n_elements = np.sum([len(iterable[i])
-                                     for i in range(len(iterable))])
-                new_shape = (n_elements,) + first_element.shape[1:]
-                self._data = np.empty(new_shape, dtype=first_element.dtype)
+            iter_len = len(iterable)
         except TypeError:
             pass
+        else:  # We do know the iterable length
+            if iter_len == 0:
+                return
+            first_element = np.asarray(iterable[0])
+            n_elements = np.sum([len(iterable[i])
+                                for i in range(len(iterable))])
+            new_shape = (n_elements,) + first_element.shape[1:]
+            self._data = np.empty(new_shape, dtype=first_element.dtype)
 
         # Initialize the `ArraySequence` object from iterable's item.
         coroutine = self._extend_using_coroutine()
@@ -99,12 +111,14 @@ class ArraySequence(object):
         """ Elements in this array sequence. """
         return self._data
 
-    @property
-    def _next_offset(self):
+    def _get_next_offset(self):
+        """ Offset in ``self._data`` at which to write next element """
         if len(self._offsets) == 0:
+            self._next_offset = 0
             return 0
         imax = np.argmax(self._offsets)
-        return self._offsets[imax] + self._lengths[imax]
+        self._next_offset = self._offsets[imax] + self._lengths[imax]
+        return self._next_offset
 
     def append(self, element):
         """ Appends `element` to this array sequence.
@@ -125,17 +139,42 @@ class ArraySequence(object):
         `ArraySequence.extend`.
         """
         element = np.asarray(element)
-
-        if self.common_shape != () and element.shape[1:] != self.common_shape:
-            msg = "All dimensions, except the first one, must match exactly"
-            raise ValueError(msg)
-
-        next_offset = self._next_offset
-        size = (next_offset + element.shape[0],) + element.shape[1:]
-        self._data.resize(size)
-        self._data[next_offset:] = element
+        if element.size == 0:
+            return
+        el_shape = element.shape
+        n_items, common_shape = el_shape[0], el_shape[1:]
+        if self._data.size == 0:  # No data, starting from scratch
+            next_offset = 0
+            req_rows = n_items
+            self._resize_data_to(n_items, common_shape)
+        elif common_shape != self.common_shape:
+            raise ValueError(
+                "All dimensions, except the first one, must match exactly")
+        else:  # We have pre-existing data
+            next_offset = self._next_offset
+            if next_offset is None:
+                next_offset = self._get_next_offset()
+            req_rows = next_offset + n_items
+            if self._data.shape[0] < req_rows:
+                self._resize_data_to(req_rows, common_shape)
+        self._data[next_offset:req_rows] = element
         self._offsets.append(next_offset)
-        self._lengths.append(element.shape[0])
+        self._lengths.append(n_items)
+        self._next_offset = req_rows
+
+    def _resize_data_to(self, n_rows, common_shape):
+        """ Resize data array if required """
+        # Calculate new data shape, rounding up to nearest buffer size
+        n_in_row = reduce(mul, common_shape, 1)
+        bytes_per_row = n_in_row * self._data.dtype.itemsize
+        bytes_per_buf = self._buffer_size * MEGABYTE
+        rows_per_buf = bytes_per_row / bytes_per_buf
+        n_bufs = np.ceil(n_rows / rows_per_buf)
+        extended_n_rows = int(n_bufs * rows_per_buf)
+        self._data.resize((extended_n_rows,) + common_shape)
+
+    def shrink_data(self):
+        self._data.resize((self._get_next_offset(),) + self.common_shape)
 
     def extend(self, elements):
         """ Appends all `elements` to this array sequence.
@@ -165,24 +204,16 @@ class ArraySequence(object):
         if len(elements) == 0:
             return
 
-        if (self.common_shape != () and
-                elements.common_shape != self.common_shape):
+        common_shape = elements.common_shape
+        if (self.common_shape != () and common_shape != self.common_shape):
             msg = "All dimensions, except the first one, must match exactly"
             raise ValueError(msg)
 
-        next_offset = self._next_offset
-        self._data.resize((next_offset + sum(elements._lengths),
-                           elements._data.shape[1]))
+        self._resize_data_to(self._get_next_offset() + elements.nb_elements,
+                             common_shape)
 
-        offsets = []
-        for offset, length in zip(elements._offsets, elements._lengths):
-            offsets.append(next_offset)
-            chunk = elements._data[offset:offset + length]
-            self._data[next_offset:next_offset + length] = chunk
-            next_offset += length
-
-        self._lengths += elements._lengths
-        self._offsets += offsets
+        for element in elements:
+            self.append(element)
 
     def _extend_using_coroutine(self, buffer_size=4):
         """ Creates a coroutine allowing to append elements.
@@ -211,7 +242,7 @@ class ArraySequence(object):
         offsets = []
         lengths = []
 
-        offset = 0 if len(self) == 0 else self._offsets[-1] + self._lengths[-1]
+        offset = self._get_next_offset()
         try:
             first_element = True
             while True:

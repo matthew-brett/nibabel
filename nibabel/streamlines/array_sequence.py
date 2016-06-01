@@ -55,8 +55,8 @@ class ArraySequence(object):
         if is_array_sequence(iterable):
             # Create a view.
             self._data = iterable._data
-            self._offsets = iterable._offsets
-            self._lengths = iterable._lengths
+            self._offsets = list(iterable._offsets)
+            self._lengths = list(iterable._lengths)
             self._is_view = True
             return
 
@@ -360,8 +360,8 @@ class ArraySequence(object):
         content = np.load(filename)
         seq = cls()
         seq._data = content["data"]
-        seq._offsets = content["offsets"]
-        seq._lengths = content["lengths"]
+        seq._offsets = list(content["offsets"])
+        seq._lengths = list(content["lengths"])
         return seq
 
 

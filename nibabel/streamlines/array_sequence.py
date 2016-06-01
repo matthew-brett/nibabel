@@ -92,12 +92,19 @@ class ArraySequence(object):
     @property
     def nb_elements(self):
         """ Total number of elements in this array sequence. """
-        return self._data.shape[0]
+        return np.sum(self._lengths)
 
     @property
     def data(self):
         """ Elements in this array sequence. """
         return self._data
+
+    @property
+    def _next_offset(self):
+        if len(self._offsets) == 0:
+            return 0
+        imax = np.argmax(self._offsets)
+        return self._offsets[imax] + self._lengths[imax]
 
     def append(self, element):
         """ Appends `element` to this array sequence.
@@ -123,8 +130,8 @@ class ArraySequence(object):
             msg = "All dimensions, except the first one, must match exactly"
             raise ValueError(msg)
 
-        next_offset = self._data.shape[0]
-        size = (self._data.shape[0] + element.shape[0],) + element.shape[1:]
+        next_offset = self._next_offset
+        size = (next_offset + element.shape[0],) + element.shape[1:]
         self._data.resize(size)
         self._data[next_offset:] = element
         self._offsets.append(next_offset)
@@ -163,8 +170,8 @@ class ArraySequence(object):
             msg = "All dimensions, except the first one, must match exactly"
             raise ValueError(msg)
 
-        next_offset = self._data.shape[0]
-        self._data.resize((self._data.shape[0] + sum(elements._lengths),
+        next_offset = self._next_offset
+        self._data.resize((next_offset + sum(elements._lengths),
                            elements._data.shape[1]))
 
         offsets = []

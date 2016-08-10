@@ -6,25 +6,25 @@
 #   copyright and license terms.
 #
 ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
-''' Read / write access to NIfTI2 image format
+''' Read / write access to CIfTI2 image format
 
-Format described here:
+Format of the NIFTI2 container format described here:
 
     http://www.nitrc.org/forum/message.php?msg_id=3738
 
-Stuff about the CIFTI2 file format here:
+Definition of the CIFTI2 header format and file extensions here:
 
-    http://www.nitrc.org/plugins/mwiki/index.php/cifti2:ConnectivityMatrixFileFormats
+    https://www.nitrc.org/forum/attachment.php?attachid=333&group_id=454&forum_id=1955
 
 '''
 from __future__ import division, print_function, absolute_import
-
 import re
+import collections
+
 import numpy as np
 
 from .. import xmlutils as xml
 from ..externals.six import string_types
-from ..externals.six.moves import reduce
 from ..filebasedimages import FileBasedHeader, FileBasedImage
 from ..nifti2 import Nifti2Image
 
@@ -82,24 +82,16 @@ CIFTI_BrainStructures = ('CIFTI_STRUCTURE_ACCUMBENS_LEFT',
                          'CIFTI_STRUCTURE_THALAMUS_RIGHT')
 
 
-def _value_if_klass(val, klass, none_ok=True):
-    if none_ok and val is None:
+def _value_if_klass(val, klass, check_isinstance_or_none=True):
+    if check_isinstance_or_none and val is None:
         return val
     elif isinstance(val, klass):
         return val
-    else:
-        raise ValueError('Not a valid %s instance.' % klass.__name__)
-
-
-def _value_or_make_klass(val, klass):
-    if val is None:
-        return klass()
-    else:
-        return _value_if_klass(val, klass)
+    raise ValueError('Not a valid %s instance.' % klass.__name__)
 
 
 def _underscore(string):
-    """ Convert a string from camelcase to underscored """
+    """ Convert a string from CamelCase to underscored """
     string = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1_\2', string)
     return re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', string).lower()
 
@@ -112,45 +104,48 @@ class Cifti2MetaData(xml.XmlSerializable):
     data : list of (name, value) tuples
     """
     def __init__(self, nvpair=None):
-        self.data = []
+        self.data = {}
         self.add_metadata(nvpair)
 
-    def _add_remove_metadata(self, metadata, func):
+    def _normalize_metadata_parameter(self, metadata):
         pairs = []
-        if isinstance(metadata, dict):
-            pairs = metadata.items()
+        if metadata is None:
+            pass
+        elif isinstance(metadata, collections.Mapping):
+            pairs = [(k, v) for k, v in metadata.items()]
         elif isinstance(metadata, (list, tuple)):
-            if not isinstance(metadata[0], string_types):
-                for item in metadata:
-                    self._add_remove_metadata(item, func)
-                return
-            elif len(metadata) == 2:
+            if len(metadata) > 0 and not isinstance(metadata[0], string_types):
+                pairs = [tuple(p) for p in metadata]
+            elif len(metadata) == 2 and isinstance(metadata[0], string_types):
                 pairs = [tuple((metadata[0], metadata[1]))]
             else:
                 raise ValueError('nvpair must be a 2-list or 2-tuple')
         else:
             raise ValueError('nvpair input must be a list, tuple or dict')
-
-        for pair in pairs:
-            if func == 'add':
-                if pair not in self.data:
-                    self.data.append(pair)
-            elif func == 'remove':
-                self.data.remove(pair)
-            else:
-                raise ValueError('Unknown func %s' % func)
+        return pairs
 
     def add_metadata(self, metadata):
         """Add metadata key-value pairs
 
-        This allows storing multiple keys with the same name but different
-        values.
+        Parameters
+        ----------
+        metadata : name-value pair, mapping, iterable of [name-value pair]
 
+        Returns
+        -------
+        None
+
+        """
+        pairs = self._normalize_metadata_parameter(metadata)
+        for pair in pairs:
+            self.data[pair[0]] = pair[1]
+
+    def remove_metadata(self, metadata):
+        """Remove metadata key-value pairs
 
         Parameters
         ----------
-        metadata : 2-List, 2-Tuple, Dictionary, List[2-List or 2-Tuple]
-                     Tuple[2-List or 2-Tuple]
+        metadata : key-value pair, mapping, iterable of [key-value pair]
 
         Returns
         -------
@@ -158,20 +153,15 @@ class Cifti2MetaData(xml.XmlSerializable):
 
         """
         if metadata is None:
-            return
-        self._add_remove_metadata(metadata, 'add')
-
-    def remove_metadata(self, metadata):
-        if metadata is None:
-            return
-        self._add_remove_metadata(metadata, 'remove')
+            raise ValueError("The metadata parameter can't be None")
+        pairs = self._normalize_metadata_parameter(metadata)
+        for k, _ in pairs:
+            del self.data[k]
 
     def _to_xml_element(self):
         metadata = xml.Element('MetaData')
 
-        for name_text, value_text in self.data:
-            if value_text is None:
-                raise CIFTI2HeaderError('MetaData element requires text description')
+        for name_text, value_text in self.data.items():
             md = xml.SubElement(metadata, 'MD')
             name = xml.SubElement(md, 'Name')
             name.text = str(name_text)
@@ -187,15 +177,14 @@ class Cifti2LabelTable(xml.XmlSerializable):
     def __init__(self):
         self.labels = []
 
-    @property
-    def num_labels(self):
+    def __len__(self):
         return len(self.labels)
 
     def get_labels_as_dict(self):
-        self.labels_as_dict = {}
+        labels_as_dict = collections.OrderedDict()
         for ele in self.labels:
-            self.labels_as_dict[ele.key] = ele.label
-        return self.labels_as_dict
+            labels_as_dict[ele.key] = ele.label
+        return labels_as_dict
 
     def _to_xml_element(self):
         if len(self.labels) == 0:
@@ -230,8 +219,8 @@ class Cifti2Label(xml.XmlSerializable):
     alpha : None or float
         Alpha color component for label.
     """
-    def __init__(self, key=0, label='', red=None, green=None, blue=None,
-                 alpha=None):
+    def __init__(self, key=0, label='', red=0, green=0, blue=0,
+                 alpha=0):
         self.key = key
         self.label = label
         self.red = red
@@ -245,17 +234,30 @@ class Cifti2Label(xml.XmlSerializable):
         return (self.red, self.green, self.blue, self.alpha)
 
     def _to_xml_element(self):
+        if self.label is '':
+            raise CIFTI2HeaderError('Label needs a name')
+        try:
+            v = int(self.key)
+        except ValueError:
+            raise CIFTI2HeaderError('The key must be an integer')
+        for c_ in ('red', 'blue', 'green', 'alpha'):
+            try:
+                v = float(getattr(self, c_))
+                if not (0 <= v <= 1):
+                    raise ValueError
+            except ValueError:
+                raise CIFTI2HeaderError(
+                    'Label invalid %s needs to be a float between 0 and 1. and it is %s' %
+                    (c_, v)
+                )
+
         lab = xml.Element('Label')
         lab.attrib['Key'] = str(self.key)
         lab.text = str(self.label)
-        if self.red is not None:
-            lab.attrib['Red'] = str(self.red)
-        if self.green is not None:
-            lab.attrib['Green'] = str(self.green)
-        if self.blue is not None:
-            lab.attrib['Blue'] = str(self.blue)
-        if self.alpha is not None:
-            lab.attrib['Alpha'] = str(self.alpha)
+
+        for name in ('red', 'green', 'blue', 'alpha'):
+            attr = str(getattr(self, name))
+            lab.attrib[name.capitalize()] = attr
         return lab
 
 
@@ -401,8 +403,8 @@ class Cifti2Vertices(xml.XmlSerializable):
         self.brain_structure = brain_structure
 
     def _to_xml_element(self):
-        if self.vertices is None:
-            raise CIFTI2HeaderError('Vertices element require a vertex table')
+        if self.brain_structure is None:
+            raise CIFTI2HeaderError('Vertices element require a BrainStructure')
 
         vertices = xml.Element('Vertices')
         vertices.attrib['BrainStructure'] = str(self.brain_structure)
@@ -412,7 +414,7 @@ class Cifti2Vertices(xml.XmlSerializable):
         return vertices
 
 
-class Cifti2Parcel(object):
+class Cifti2Parcel(xml.XmlSerializable):
     """Cifti2 parcel: association of a name with vertices and/or voxels
 
     Attributes
@@ -465,7 +467,7 @@ class Cifti2Parcel(object):
         return parcel
 
 
-class Cifti2TransformationMatrixVoxelIndicesIJKtoXYZ(object):
+class Cifti2TransformationMatrixVoxelIndicesIJKtoXYZ(xml.XmlSerializable):
     """Matrix that translates voxel indices to spatial coordinates
 
     Attributes
@@ -497,7 +499,7 @@ class Cifti2TransformationMatrixVoxelIndicesIJKtoXYZ(object):
         return trans
 
 
-class Cifti2Volume(object):
+class Cifti2Volume(xml.XmlSerializable):
     """Cifti2 volume: information about a volume for mappings that use voxels
 
     Attributes
@@ -526,7 +528,7 @@ class Cifti2Volume(object):
         return volume
 
 
-class Cifti2VertexIndices(object):
+class Cifti2VertexIndices(xml.XmlSerializable):
     """Cifti2 vertex indices: vertex indices for an associated brain model
 
     Attributes
@@ -638,7 +640,7 @@ class Cifti2MatrixIndicesMap(object):
         self.named_maps = named_maps if named_maps is not None else []
         self.parcels = parcels if parcels is not None else []
         self.surfaces = surfaces if surfaces is not None else []
-        self.volume = volume  # _value_or_make_klass(volume, Cifti2Volume)
+        self.volume = volume
 
     def add_cifti_brain_model(self, brain_model):
         """ Adds a brain model to the Cifti2MatrixIndicesMap
@@ -811,15 +813,10 @@ class Cifti2Matrix(xml.XmlSerializable):
 class Cifti2Header(FileBasedHeader, xml.XmlSerializable):
     ''' Class for Cifti2 header extension '''
 
-    # version = str
-
     def __init__(self, matrix=None, version="2.0"):
         FileBasedHeader.__init__(self)
         xml.XmlSerializable.__init__(self)
-        if matrix is None:
-            self.matrix = Cifti2Matrix()
-        else:
-            self.matrix = matrix
+        self.matrix = Cifti2Matrix() if matrix is None else Cifti2Matrix()
         self.version = version
 
     def _to_xml_element(self):
@@ -845,9 +842,8 @@ class Cifti2Header(FileBasedHeader, xml.XmlSerializable):
 
 
 class Cifti2Image(FileBasedImage):
-    # It is a Nifti2Image, but because Nifti2Image object
-    # contains both the *format* and the assumption that it's
-    # a spatial image, we can't inherit directly.
+    """ Class for single file CIfTI2 format image
+    """
     header_class = Cifti2Header
     valid_exts = Nifti2Image.valid_exts
     files_types = Nifti2Image.files_types
@@ -855,12 +851,37 @@ class Cifti2Image(FileBasedImage):
     rw = True
 
     def __init__(self, data=None, header=None, nifti_header=None):
+        ''' Initialize image
+
+        The image is a combination of (array, affine matrix, header, nifti_header),
+        with optional metadata in `extra`, and filename / file-like objects
+        contained in the `file_map` mapping.
+
+        Parameters
+        ----------
+        dataobj : object
+           Object containg image data.  It should be some object that retuns an
+           array from ``np.asanyarray``.  It should have a ``shape`` attribute
+           or property
+        affine : None or (4,4) array-like
+           homogenous affine giving relationship between voxel coordinates and
+           world coordinates.  Affine can also be None.  In this case,
+           ``obj.affine`` also returns None, and the affine as written to disk
+           will depend on the file format.
+        header : Cifti2Header object
+        nifti_header : None or mapping or nifti2 header instance, optional
+           metadata for this image format
+        '''
         self._header = header or Cifti2Header()
         self.data = data
         self.extra = nifti_header
 
     def get_data(self):
         return self.data
+
+    @property
+    def shape(self):
+        return self.data.shape
 
     @classmethod
     def from_file_map(klass, file_map):
@@ -878,18 +899,19 @@ class Cifti2Image(FileBasedImage):
         nifti_img = _Cifti2AsNiftiImage.from_file_map(file_map)
 
         # Get cifti2 header
-        cifti_header = reduce(lambda accum, item:
-                              item.get_content()
-                              if isinstance(item, Cifti2Extension)
-                              else accum,
-                              nifti_img.get_header().extensions or [],
-                              None)
+        for item in nifti_img.get_header().extensions:
+            if isinstance(item, Cifti2Extension):
+                cifti_header = item.get_content()
+                break
+        else:
+            cifti_header = None
+
         if cifti_header is None:
             raise ValueError('Nifti2 header does not contain a CIFTI2 '
                              'extension')
 
         # Construct cifti image
-        cifti_img = Cifti2Image(data=np.squeeze(nifti_img.get_data()),
+        cifti_img = Cifti2Image(data=nifti_img.get_data()[0, 0, 0, 0],
                                 header=cifti_header,
                                 nifti_header=nifti_img.get_header())
         cifti_img.file_map = nifti_img.file_map
@@ -910,13 +932,12 @@ class Cifti2Image(FileBasedImage):
         header = self.extra
         extension = Cifti2Extension(content=self.header.to_xml())
         header.extensions.append(extension)
-        data = np.reshape(self.data, [1, 1, 1, 1] + list(self.data.shape))
+        data = np.reshape(self.data, (1, 1, 1, 1) + self.data.shape)
         img = Nifti2Image(data, None, header)
         img.to_file_map(file_map or self.file_map)
 
 
 class Cifti2DenseDataSeriesHeader(Cifti2Header):
-
     @classmethod
     def may_contain_header(klass, binaryblock):
         from .parse_cifti2_fast import _Cifti2DenseDataSeriesNiftiHeader
@@ -964,8 +985,7 @@ def load(filename):
     ImageFileError: if `filename` doesn't look like cifti
     IOError : if `filename` does not exist
     """
-    from .parse_cifti2_fast import _Cifti2AsNiftiImage
-    return _Cifti2AsNiftiImage.from_filename(filename)
+    return Cifti2Image.from_filename(filename)
 
 
 def save(img, filename):

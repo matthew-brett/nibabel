@@ -9,20 +9,20 @@
 from __future__ import division, print_function, absolute_import
 
 from os.path import join as pjoin, dirname
-import sys
 import io
-from distutils.version import LooseVersion
 
-import numpy as np
+from distutils.version import LooseVersion
 
 import nibabel as nib
 from nibabel import cifti2 as ci
+from nibabel.cifti2.parse_cifti2_fast import _Cifti2AsNiftiHeader
+
 from nibabel.tmpdirs import InTemporaryDirectory
 from nibabel.tests.nibabel_data import get_nibabel_data, needs_nibabel_data
+from nibabel.tests.test_nifti2 import TestNifti2SingleHeader
 
-from numpy.testing import assert_array_equal, assert_array_almost_equal
-from nose.tools import (assert_true, assert_false, assert_equal,
-                        assert_raises)
+from numpy.testing import assert_array_almost_equal
+from nose.tools import (assert_true, assert_equal, assert_raises)
 
 NIBABEL_TEST_DATA = pjoin(dirname(nib.__file__), 'tests', 'data')
 NIFTI2_DATA = pjoin(NIBABEL_TEST_DATA, 'example_nifti2.nii.gz')
@@ -43,10 +43,12 @@ datafiles = [DATA_FILE2, DATA_FILE3, DATA_FILE4, DATA_FILE5, DATA_FILE6]
 
 
 def test_read_nifti2():
+    # Error trying to read a CIFTI2 image from a NIfTI2-only image.
     filemap = ci.Cifti2Image.make_file_map()
     for k in filemap:
         filemap[k].fileobj = io.open(NIFTI2_DATA)
     assert_raises(ValueError, ci.Cifti2Image.from_file_map, filemap)
+
 
 @needs_nibabel_data('nitest-cifti2')
 def test_read_internal():
@@ -54,17 +56,20 @@ def test_read_internal():
     assert_true(isinstance(img2.header, ci.Cifti2Header))
     assert_equal(img2.shape, (1, 91282))
 
+
 @needs_nibabel_data('nitest-cifti2')
 def test_read():
     img2 = nib.load(DATA_FILE6)
     assert_true(isinstance(img2.header, ci.Cifti2Header))
     assert_equal(img2.shape, (1, 91282))
 
+
 @needs_nibabel_data('nitest-cifti2')
 def test_version():
     for i, dat in enumerate(datafiles):
         img = nib.load(dat)
         assert_equal(LooseVersion(img.header.version), LooseVersion('2'))
+
 
 @needs_nibabel_data('nitest-cifti2')
 def test_readwritedata():
@@ -78,8 +83,10 @@ def test_readwritedata():
             # Order should be preserved in load/save
             for mim1, mim2 in zip(img.header.matrix,
                                   img2.header.matrix):
-                named_maps1 = [m_ for m_ in mim1 if isinstance(m_, ci.Cifti2NamedMap)]
-                named_maps2 = [m_ for m_ in mim2 if isinstance(m_, ci.Cifti2NamedMap)]
+                named_maps1 = [m_ for m_ in mim1
+                               if isinstance(m_, ci.Cifti2NamedMap)]
+                named_maps2 = [m_ for m_ in mim2
+                               if isinstance(m_, ci.Cifti2NamedMap)]
                 assert_equal(len(named_maps1), len(named_maps2))
                 for map1, map2 in zip(named_maps1, named_maps2):
                     assert_equal(map1.map_name, map2.map_name)
@@ -103,8 +110,10 @@ def test_nibabel_readwritedata():
             # Order should be preserved in load/save
             for mim1, mim2 in zip(img.header.matrix,
                                   img2.header.matrix):
-                named_maps1 = [m_ for m_ in mim1 if isinstance(m_, ci.Cifti2NamedMap)]
-                named_maps2 = [m_ for m_ in mim2 if isinstance(m_, ci.Cifti2NamedMap)]
+                named_maps1 = [m_ for m_ in mim1
+                               if isinstance(m_, ci.Cifti2NamedMap)]
+                named_maps2 = [m_ for m_ in mim2
+                               if isinstance(m_, ci.Cifti2NamedMap)]
                 assert_equal(len(named_maps1), len(named_maps2))
                 for map1, map2 in zip(named_maps1, named_maps2):
                     assert_equal(map1.map_name, map2.map_name)
@@ -148,7 +157,8 @@ def test_cifti2types():
                     counter[ci.Cifti2BrainModel] += 1
                     if isinstance(map_.vertex_indices, ci.Cifti2VertexIndices):
                         counter[ci.Cifti2VertexIndices] += 1
-                    if isinstance(map_.voxel_indices_ijk, ci.Cifti2VoxelIndicesIJK):
+                    if isinstance(map_.voxel_indices_ijk,
+                                  ci.Cifti2VoxelIndicesIJK):
                         counter[ci.Cifti2VoxelIndicesIJK] += 1
                 elif isinstance(map_, ci.Cifti2NamedMap):
                     counter[ci.Cifti2NamedMap] += 1
@@ -156,7 +166,8 @@ def test_cifti2types():
                     if isinstance(map_.label_table, ci.Cifti2LabelTable):
                         counter[ci.Cifti2LabelTable] += 1
                         for label in map_.label_table:
-                            assert_true(isinstance(map_.label_table[label], ci.Cifti2Label))
+                            assert_true(isinstance(map_.label_table[label],
+                                                   ci.Cifti2Label))
                             counter[ci.Cifti2Label] += 1
                 elif isinstance(map_, ci.Cifti2Parcel):
                     counter[ci.Cifti2Parcel] += 1
@@ -175,11 +186,61 @@ def test_cifti2types():
                                   ci.Cifti2TransformationMatrixVoxelIndicesIJKtoXYZ):
                         counter[ci.Cifti2TransformationMatrixVoxelIndicesIJKtoXYZ] += 1
 
-            assert_equal(list(mim.named_maps), [m_ for m_ in mim if isinstance(m_, ci.Cifti2NamedMap)])
-            assert_equal(list(mim.surfaces), [m_ for m_ in mim if isinstance(m_, ci.Cifti2Surface)])
-            assert_equal(list(mim.parcels), [m_ for m_ in mim if isinstance(m_, ci.Cifti2Parcel)])
-            assert_equal(list(mim.brain_models), [m_ for m_ in mim if isinstance(m_, ci.Cifti2BrainModel)])
-            assert_equal([mim.volume] if mim.volume else [], [m_ for m_ in mim if isinstance(m_, ci.Cifti2Volume)])
+            assert_equal(list(mim.named_maps),
+                         [m_ for m_ in mim if isinstance(m_, ci.Cifti2NamedMap)])
+            assert_equal(list(mim.surfaces),
+                         [m_ for m_ in mim if isinstance(m_, ci.Cifti2Surface)])
+            assert_equal(list(mim.parcels),
+                         [m_ for m_ in mim if isinstance(m_, ci.Cifti2Parcel)])
+            assert_equal(list(mim.brain_models),
+                         [m_ for m_ in mim if isinstance(m_, ci.Cifti2BrainModel)])
+            assert_equal([mim.volume] if mim.volume else [],
+                         [m_ for m_ in mim if isinstance(m_, ci.Cifti2Volume)])
 
     for klass, count in counter.items():
         assert_true(count > 0, "No exercise of " + klass.__name__)
+
+
+class TestCifti2SingleHeader(TestNifti2SingleHeader):
+    header_class = _Cifti2AsNiftiHeader
+    _pixdim_message = 'pixdim[1,2,3] should be zero or positive'
+
+    def test_pixdim_checks(self):
+        hdr_t = self.header_class()
+        for i in (1, 2, 3):
+            hdr = hdr_t.copy()
+            hdr['pixdim'][i] = -1
+            assert_equal(self._dxer(hdr), self._pixdim_message)
+
+    def test_nifti_qfac_checks(self):
+        # Test qfac is 1 or -1 or 0
+        hdr = self.header_class()
+        # 1, 0, -1 all OK
+        hdr['pixdim'][0] = 1
+        self.log_chk(hdr, 0)
+        hdr['pixdim'][0] = 0
+        self.log_chk(hdr, 0)
+        hdr['pixdim'][0] = -1
+        self.log_chk(hdr, 0)
+        # Anything else is not
+        hdr['pixdim'][0] = 2
+        fhdr, message, raiser = self.log_chk(hdr, 20)
+        assert_equal(fhdr['pixdim'][0], 1)
+        assert_equal(message,
+                     'pixdim[0] (qfac) should be 1 '
+                     '(default) or 0 or -1; setting qfac to 1')
+
+    def test_pixdim_log_checks(self):
+        # pixdim can be zero or positive
+        HC = self.header_class
+        hdr = HC()
+        hdr['pixdim'][1] = -2  # severity 35
+        fhdr, message, raiser = self.log_chk(hdr, 35)
+        assert_equal(fhdr['pixdim'][1], 2)
+        assert_equal(message, self._pixdim_message +
+                     '; setting to abs of pixdim values')
+        assert_raises(*raiser)
+        hdr = HC()
+        hdr['pixdim'][1:4] = 0  # No error or warning
+        fhdr, message, raiser = self.log_chk(hdr, 0)
+        assert_equal(raiser, ())

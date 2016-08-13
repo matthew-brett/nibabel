@@ -6,6 +6,16 @@ from xml.etree import ElementTree
 import numpy as np
 
 from nibabel import cifti2 as ci
+from ...nifti1 import data_type_codes, intent_codes
+
+from nibabel import cifti2 as ci
+from nibabel.cifti2.cifti2 import _float_01
+
+from numpy.testing import (assert_array_almost_equal,
+                           assert_array_equal)
+
+from nose.tools import assert_true, assert_equal, assert_raises, assert_is_none
+>>>>>>> 5646de4e2e8ae5756c2f9a886b1af9480fc711a6
 
 from nose.tools import assert_equal, assert_raises, assert_is_none
 
@@ -57,6 +67,18 @@ def test_cifti2_metadata():
                  '<MetaData><MD><Name>b</Name><Value>bval</Value></MD></MetaData>')
 
 
+def test__float_01():
+    assert_equal(_float_01(0), 0)
+    assert_equal(_float_01(1), 1)
+    assert_equal(_float_01('0'), 0)
+    assert_equal(_float_01('0.2'), 0.2)
+    assert_raises(ValueError, _float_01, 1.1)
+    assert_raises(ValueError, _float_01, -0.1)
+    assert_raises(ValueError, _float_01, 2)
+    assert_raises(ValueError, _float_01, -1)
+    assert_raises(ValueError, _float_01, 'foo')
+
+
 def test_cifti2_labeltable():
     lt = ci.Cifti2LabelTable()
     assert_equal(len(lt), 0)
@@ -84,14 +106,16 @@ def test_cifti2_labeltable():
 
     assert_raises(ValueError, lt.__setitem__, 1, label)
     assert_raises(ValueError, lt.__setitem__, 0, test_tuple[:-1])
-
+    assert_raises(ValueError, lt.__setitem__, 0, ('foo', 1.1, 0, 0, 1))
+    assert_raises(ValueError, lt.__setitem__, 0, ('foo', 1.0, -1, 0, 1))
+    assert_raises(ValueError, lt.__setitem__, 0, ('foo', 1.0, 0, -0.1, 1))
 
 def test_cifti2_label():
     lb = ci.Cifti2Label()
     lb.label = 'Test'
     lb.key = 0
     assert_equal(lb.rgba, (0, 0, 0, 0))
-    assert(compare_xml_leaf(
+    assert_true(compare_xml_leaf(
         lb.to_xml().decode('utf-8'),
         "<Label Key='0' Red='0' Green='0' Blue='0' Alpha='0'>Test</Label>"
     ))
@@ -102,7 +126,7 @@ def test_cifti2_label():
     lb.alpha = 0.3
     assert_equal(lb.rgba, (0, 0.1, 0.2, 0.3))
 
-    assert(compare_xml_leaf(
+    assert_true(compare_xml_leaf(
         lb.to_xml().decode('utf-8'),
         "<Label Key='0' Red='0' Green='0.1' Blue='0.2' Alpha='0.3'>Test</Label>"
     ))

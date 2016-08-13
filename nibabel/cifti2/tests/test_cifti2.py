@@ -15,9 +15,6 @@ from numpy.testing import (assert_array_almost_equal,
                            assert_array_equal)
 
 from nose.tools import assert_true, assert_equal, assert_raises, assert_is_none
->>>>>>> 5646de4e2e8ae5756c2f9a886b1af9480fc711a6
-
-from nose.tools import assert_equal, assert_raises, assert_is_none
 
 
 def compare_xml_leaf(str1, str2):

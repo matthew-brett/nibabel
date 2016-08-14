@@ -16,6 +16,8 @@ from numpy.testing import (assert_array_almost_equal,
 
 from nose.tools import assert_true, assert_equal, assert_raises, assert_is_none
 
+from nibabel.tests.test_dataobj_images import TestDataobjAPI as _TDA
+
 
 def compare_xml_leaf(str1, str2):
     x1 = ElementTree.fromstring(str1)
@@ -112,6 +114,7 @@ def test_cifti2_labeltable():
     assert_raises(ValueError, lt.__setitem__, 0, ('foo', 1.1, 0, 0, 1))
     assert_raises(ValueError, lt.__setitem__, 0, ('foo', 1.0, -1, 0, 1))
     assert_raises(ValueError, lt.__setitem__, 0, ('foo', 1.0, 0, -0.1, 1))
+
 
 def test_cifti2_label():
     lb = ci.Cifti2Label()

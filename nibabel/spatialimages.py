@@ -663,7 +663,7 @@ class SpatialImage(FileBasedImage):
                         "array data with `img.dataobj[slice]` or "
                         "`img.get_data()[slice]`")
 
-    def orthoview(self):
+    def orthoview(self, **kwargs):
         """Plot the image using OrthoSlicer3D
 
         Returns
@@ -678,4 +678,4 @@ class SpatialImage(FileBasedImage):
         the figure.
         """
         return OrthoSlicer3D(self.dataobj, self.affine,
-                             title=self.get_filename())
+                             title=self.get_filename(), **kwargs)

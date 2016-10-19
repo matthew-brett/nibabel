@@ -24,6 +24,7 @@ from nose.tools import (assert_true, assert_false, assert_equal,
 from numpy.testing import assert_array_equal, assert_array_almost_equal
 
 from .test_helpers import bytesio_round_trip
+from .test_viewers import needs_mpl
 from ..testing import (clear_and_catch_warnings, suppress_warnings,
                        VIRAL_MEMMAP)
 from ..tmpdirs import InTemporaryDirectory
@@ -334,6 +335,16 @@ class TestSpatialImage(TestCase):
         rt_img.uncache()
         assert_false(rt_img.get_data() is out_data)
         assert_array_equal(rt_img.get_data(), in_data)
+
+    @needs_mpl
+    def test_orthoview(self):
+        # Assumes all possible images support int16
+        # See https://github.com/nipy/nibabel/issues/58
+        arr = np.arange(24, dtype=np.int16).reshape((2, 3, 4))
+        img = self.image_class(arr, None)
+        img.orthoview().close()
+        img.orthoview(vlim=(5, 10)).close()
+        img.orthoview(slicer=Ellipsis).close()
 
     def test_api_deprecations(self):
 

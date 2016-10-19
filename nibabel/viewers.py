@@ -42,7 +42,8 @@ class OrthoSlicer3D(object):
     """
     # Skip doctest above b/c not all systems have mpl installed
 
-    def __init__(self, data, affine=None, axes=None, title=None, vlim=None):
+    def __init__(self, data, affine=None, axes=None, title=None, vlim=None,
+                 slicer=None):
         """
         Parameters
         ----------
@@ -64,6 +65,9 @@ class OrthoSlicer3D(object):
         vlim : array-like or None, optional
             Value limits to display image and time series. Can be None
             (default) to derive limits from data.
+        slicer : object or None
+            Something that can be used to slice an array as in
+            ``arr[sliceobj]``. Can be None (default) to display all data.
         """
         # Use these late imports of matplotlib so that we have some hope that
         # the test functions are the first to set the matplotlib backend. The
@@ -74,6 +78,8 @@ class OrthoSlicer3D(object):
         self._closed = False
 
         data = np.asanyarray(data)
+        if slicer is not None:
+            data = data[slicer]
         if data.ndim < 3:
             raise ValueError('data must have at least 3 dimensions')
         if np.iscomplexobj(data):

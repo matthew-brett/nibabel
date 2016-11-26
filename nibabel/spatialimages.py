@@ -671,9 +671,11 @@ class SpatialImage(FileBasedImage):
         axes : tuple of mpl.Axes or None, optional
             3 or 4 axes instances for the 3 slices plus volumes,
             or None (default).
-        vlim : array-like or None, optional
-            Value limits to display image and time series. Can be None
-            (default) to derive limits from data.
+        vlim : None or length 2 sequence, optional
+            Lower, higher value limits to display image and time series. Can be
+            None (default), corresponding to ``('1%', '99%')``. Bounds can be
+            of the form ``x`` where ``x`` is a numerical value, or ``'x%'`` to
+            use the ``x`` percentile of the data.
         slicer : object or None
             Something that can be used to slice an array as in
             ``arr[sliceobj]``. Can be None (default) to display all data.

@@ -123,3 +123,24 @@ def test_viewer():
     OrthoSlicer3D(data, slicer=(slice(0, -1), slice(0, -1), slice(0, -1))).close()
     # Fail if we slice too thin
     assert_raises(ValueError, OrthoSlicer3D, data, slicer=(Ellipsis, 0, 0))
+
+
+@needs_mpl
+def test_viewer_vlims():
+    shape = (5, 6, 7)
+    data = np.linspace(-1, 2, np.prod(shape)).reshape(shape)
+    p1, p3, p94, p99 = np.percentile(data, [1, 3, 94, 99])
+    assert_array_equal(OrthoSlicer3D(data).clim, [p1, p99])
+    for vlim, expected in ((None, (p1, p99)),
+                           ((0, 1), (0, 1)),
+                           ((0, '94%'), (0, p94)),
+                           (('3%', 1), (p3, 1)),
+                           (('3%', '94%'), (p3, p94)),
+                          ):
+        assert_array_equal(OrthoSlicer3D(data, vlim=vlim).clim, expected)
+        # Default
+        ov = OrthoSlicer3D(data)
+        assert_array_equal(ov.clim, [p1, p99])
+        # Changed
+        ov.clim = vlim
+        assert_array_equal(ov.clim, expected)

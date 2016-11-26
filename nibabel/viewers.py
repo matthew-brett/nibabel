@@ -8,6 +8,7 @@ from __future__ import division, print_function
 import numpy as np
 import weakref
 
+from .externals.six import string_types
 from .affines import voxel_sizes
 from .optpkg import optional_package
 from .orientations import aff2axcodes, axcodes2ornt
@@ -41,6 +42,7 @@ class OrthoSlicer3D(object):
     >>> OrthoSlicer3D(data).show()  # doctest: +SKIP
     """
     # Skip doctest above b/c not all systems have mpl installed
+    default_clim = ('1%', '99%')
 
     def __init__(self, data, affine=None, axes=None, title=None, vlim=None,
                  slicer=None):
@@ -62,10 +64,11 @@ class OrthoSlicer3D(object):
         title : str or None, optional
             The title to display. Can be None (default) to display no
             title.
-        vlim : array-like or None, optional
-            Value limits to display image and time series. Can be None
-            (default) to derive limits from data. Bounds can be of the
-            form ``'x%'`` to use the ``x`` percentile of the data.
+        vlim : None or length 2 sequence, optional
+            Lower, higher value limits to display image and time series. Can be
+            None (default), corresponding to ``('1%', '99%')``. Bounds can be
+            of the form ``x`` where ``x`` is a numerical value, or ``'x%'`` to
+            use the ``x`` percentile of the data.
         slicer : object or None
             Something that can be used to slice an array as in
             ``arr[sliceobj]``. Can be None (default) to display all data.
@@ -89,12 +92,6 @@ class OrthoSlicer3D(object):
         if affine.shape != (4, 4):
             raise ValueError('affine must be a 4x4 matrix')
 
-        if vlim is not None:
-            percentiles = all(isinstance(lim, str) and lim[-1] == '%'
-                              for lim in vlim)
-            if percentiles:
-                vlim = np.percentile(data, [float(lim[:-1]) for lim in vlim])
-
         # determine our orientation
         self._affine = affine
         codes = axcodes2ornt(aff2axcodes(self._affine))
@@ -107,8 +104,7 @@ class OrthoSlicer3D(object):
         self._volume_dims = data.shape[3:]
         self._current_vol_data = data[:, :, :, 0] if data.ndim > 3 else data
         self._data = data
-        self._clim = np.percentile(data, (1., 99.)) if vlim is None else vlim
-        del data
+        self._set_clim(vlim)
 
         if axes is None:  # make the axes
             # ^ +---------+   ^ +---------+
@@ -200,11 +196,7 @@ class OrthoSlicer3D(object):
             ax.set_xticks(np.unique(np.linspace(0, self.n_volumes - 1,
                                                 5).astype(int)))
             ax.set_xlim(x[0], x[-1])
-            if vlim is None:
-                yl = [self._data.min(), self._data.max()]
-                yl = [l + s * np.diff(lims)[0] for l, s in zip(yl, [-1.01, 1.01])]
-            else:
-                yl = vlim
+            yl = self._clim
             patch = mpl_patch.Rectangle([-0.5, yl[0]], 1., np.diff(yl)[0],
                                         fill=True, facecolor=(0, 1, 0),
                                         edgecolor=(0, 1, 0), alpha=0.25)
@@ -296,14 +288,35 @@ class OrthoSlicer3D(object):
         """The current color limits"""
         return self._clim
 
+    def _set_clim(self, value):
+        """ Set data limits from specifier `value`
+
+        Parameters
+        ----------
+        value : None or length-2 sequence
+            Lower, higher value limits to display image and time series. Can be
+            None (default), corresponding to ``('1%', '99%')``. Bounds can be
+            of the form ``x`` where ``x`` is a numerical value, or ``'x%'`` to
+            use the ``x`` percentile of the data.
+        """
+        value = list(self.default_clim if value is None else value)
+        if len(value) != 2:
+            raise ValueError('clim must be a 2-element sequence')
+        # Find and replace percentile specifiers with data values
+        pct_inds = [i for i, v in enumerate(value)
+                    if isinstance(v, string_types) and v[-1] == '%']
+        if len(pct_inds):
+            pct_vals = [float(value[i][:-1]) for i in pct_inds]
+            percentiles = np.percentile(self._data, pct_vals)
+            for i, val in zip(pct_inds, percentiles):
+                value[i] = val
+        self._clim = tuple(float(v) for v in value)
+
     @clim.setter
-    def clim(self, clim):
-        clim = np.array(clim, float)
-        if clim.shape != (2,):
-            raise ValueError('clim must be a 2-element array-like')
+    def clim(self, value):
+        self._set_clim(value)
         for im in self._ims:
-            im.set_clim(clim)
-        self._clim = tuple(clim)
+            im.set_clim(self._clim)
         self.draw()
 
     def link_to(self, other):
